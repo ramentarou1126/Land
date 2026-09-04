@@ -308,17 +308,18 @@
 <body>
 <div class="grid-bg"></div>
 
-<!-- 診断ログ(コンソールが見られない環境向け) -->
+<!-- 診断ログ(運営のみ表示) -->
 <div id="diag-panel" class="hud" style="position:fixed; left:12px; bottom:54px; width:min(360px,86vw); max-height:280px; overflow-y:auto; background:var(--panel-solid); border:1px solid var(--border); z-index:200; padding:12px 14px; display:none;">
   <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
   <span class="corner corner-bl"></span><span class="corner corner-br"></span>
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-    <strong style="font-size:12.5px;">診断ログ</strong>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:6px;">
+    <strong style="font-size:12.5px; flex:1;">診断ログ</strong>
+    <button id="diag-copy-btn" class="icon-btn" style="font-size:12px; padding:2px 10px;">コピー</button>
     <button id="diag-close-btn" class="icon-btn" style="font-size:16px; padding:0 6px;">×</button>
   </div>
   <div id="diag-lines" class="mono" style="white-space:pre-wrap; line-height:1.7; font-size:11px; color:var(--text-dim);"></div>
 </div>
-<button id="diag-toggle-btn" class="icon-btn" title="診断ログを表示"
+<button id="diag-toggle-btn" class="icon-btn hidden" title="診断ログを表示"
   style="position:fixed; left:12px; bottom:12px; z-index:199; background:var(--panel-solid); border:1px solid var(--border); width:34px; height:34px; padding:0; font-size:16px;">i</button>
 
 <script>
@@ -360,6 +361,34 @@
   document.getElementById("diag-close-btn").addEventListener("click", function(){
     document.getElementById("diag-panel").style.display = "none";
   });
+  document.getElementById("diag-copy-btn").addEventListener("click", function(){
+    var lines = Array.prototype.map.call(
+      document.querySelectorAll("#diag-lines > div"),
+      function(d){ return d.textContent; }
+    ).join("\n");
+    function fallbackCopy(text){
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); window.__diag("ログをコピーしました"); }
+      catch (e) { window.__diag("コピーに失敗しました: " + e.message, "error"); }
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(lines).then(function(){
+        window.__diag("ログをコピーしました");
+      }).catch(function(){ fallbackCopy(lines); });
+    } else {
+      fallbackCopy(lines);
+    }
+  });
+  window.__showDiagForAdmin = function(){
+    var btn = document.getElementById("diag-toggle-btn");
+    if (btn) btn.classList.remove("hidden");
+  };
   window.__diag("ページ読み込み開始");
 })();
 </script>
@@ -553,8 +582,27 @@
     <div id="admin-trash-empty" class="admin-empty">ゴミ箱は空です。</div>
     <button id="admin-purge-expired-btn" class="btn btn-sm">期限切れをまとめて完全削除</button>
 
+    <h3>アクセス禁止ユーザー</h3>
+    <p class="hint">建国していないユーザーでも、Discord IDを直接入力して先に禁止できます。</p>
+    <div class="color-row">
+      <input id="ban-discord-id-input" type="text" placeholder="DiscordのID(数字)">
+      <button id="ban-discord-id-btn" class="btn btn-sm btn-danger">禁止</button>
+    </div>
+    <div id="admin-banned-list" class="region-list" style="margin-top:10px;"></div>
+    <div id="admin-banned-empty" class="admin-empty">禁止中のユーザーはいません。</div>
+
+    <h3 id="admin-manage-heading" class="hidden">運営の管理(最高権力者のみ)</h3>
+    <div id="admin-manage-section" class="hidden">
+      <p class="hint">Discord IDを直接入力して運営に追加できます(建国していなくても構いません)。</p>
+      <div class="color-row">
+        <input id="promote-discord-id-input" type="text" placeholder="DiscordのID(数字)">
+        <button id="promote-discord-id-btn" class="btn btn-sm">運営にする</button>
+      </div>
+      <div id="admin-list" class="region-list" style="margin-top:10px;"></div>
+    </div>
+
     <h3>国の一覧</h3>
-    <p class="hint">運営の追加・削除は最高権力者だけが行えます(この国の一覧に運営管理ボタンが表示されます)。</p>
+    <p class="hint">運営の追加・削除は最高権力者だけが行えます(この国の一覧にも運営管理ボタンが表示されます)。</p>
     <div id="admin-country-list"></div>
     <div id="admin-country-empty" class="admin-empty">まだ国はありません。</div>
 
@@ -840,9 +888,26 @@ async function initMapOnce() {
     .append("path")
     .attr("d", path)
     .attr("data-region-id", (d) => regionIdOf(d))
-    .classed("is-restricted", (d) => restrictedRegionIds.has(regionIdOf(d)))
-    .on("click", (event, d) => onRegionClick(regionIdOf(d), regionNameOf(d)))
-    .on("mousemove", (event, d) => showTooltip(event, regionIdOf(d), regionNameOf(d)))
+    .classed("is-restricted", (d) => restrictedRegionIds.has(regionIdOf(d)));
+
+  // 区画数が多いため、1つずつにイベントを付けず地図全体に1つだけ委譲して負荷を下げる
+  let lastTooltipMove = 0;
+  svg
+    .on("click", (event) => {
+      const target = event.target.closest("path[data-region-id]");
+      if (!target) return;
+      const id = target.getAttribute("data-region-id");
+      onRegionClick(id, regionNames[id] || id);
+    })
+    .on("mousemove", (event) => {
+      const now = performance.now();
+      if (now - lastTooltipMove < 40) return; // 過剰な再描画を防ぐ簡易スロットル
+      lastTooltipMove = now;
+      const target = event.target.closest("path[data-region-id]");
+      if (!target) { hideTooltip(); return; }
+      const id = target.getAttribute("data-region-id");
+      showTooltip(event, id, regionNames[id] || id);
+    })
     .on("mouseleave", hideTooltip);
 
   svg.call(
@@ -887,7 +952,7 @@ function hideTooltip(){ el("hover-tooltip").classList.add("hidden"); }
 function applyClaimColors(){
   if (!pathSelection) return;
   pathSelection
-    .attr("fill", (d) => {
+    .style("fill", (d) => {
       const id = regionIdOf(d);
       if (restrictedRegionIds.has(id)) return null;
       const claim = claimsCache[id];
@@ -947,7 +1012,7 @@ function watchAdminStatus(){
   onValue(ref(db, `admins/${currentUser.uid}`), (snap) => {
     isAdmin = snap.val() === true || isSupremeAdmin;
     el("admin-open-btn").classList.toggle("hidden", !isAdmin);
-    if (isAdmin) watchTrash();
+    if (isAdmin) { watchTrash(); window.__showDiagForAdmin(); }
     applyMaintenanceGate();
   }, (error) => {
     // 権限エラーは想定内(admins自体は誰でも読めるルールだが念のため)
@@ -956,6 +1021,7 @@ function watchAdminStatus(){
       isAdmin = true;
       el("admin-open-btn").classList.remove("hidden");
       watchTrash();
+      window.__showDiagForAdmin();
       applyMaintenanceGate();
     }
   });
@@ -978,6 +1044,7 @@ function watchAllAdmins(){
   onValue(ref(db, "admins"), (snap) => {
     allAdmins = snap.val() || {};
     renderAdminCountryList();
+    renderAdminManageSection();
   }, (error) => {
     window.__diag("admins一覧の読み取りに失敗: [" + error.code + "] " + error.message, "error");
   });
@@ -1031,6 +1098,7 @@ function watchBanned(){
   onValue(ref(db, "banned"), (snap) => {
     bannedCache = snap.val() || {};
     renderAdminCountryList();
+    renderBannedList();
   }, (error) => {
     window.__diag("banned読み取りに失敗: [" + error.code + "] " + error.message, "error");
   });
@@ -1136,9 +1204,86 @@ const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 el("admin-open-btn").addEventListener("click", () => {
   renderAdminTrashList();
   renderAdminCountryList();
+  renderBannedList();
+  renderAdminManageSection();
   el("admin-panel").classList.remove("hidden");
 });
 el("admin-close-btn").addEventListener("click", () => el("admin-panel").classList.add("hidden"));
+
+function discordIdToUid(rawInput){
+  const idStr = String(rawInput || "").trim();
+  if (!/^\d{5,25}$/.test(idStr)) return null;
+  return `discord:${idStr}`;
+}
+
+// ---------- アクセス禁止ユーザー(Discord IDを直接指定) ----------
+el("ban-discord-id-btn").addEventListener("click", () => {
+  const uid = discordIdToUid(el("ban-discord-id-input").value);
+  if (!uid) { showToast("Discord IDを正しく入力してください(数字のみ)。", "error"); return; }
+  showConfirmModal(`Discord ID「${el("ban-discord-id-input").value.trim()}」を主張禁止にしますか?`, async () => {
+    await adminToggleBan(uid, true);
+    el("ban-discord-id-input").value = "";
+    renderBannedList();
+  });
+});
+
+function renderBannedList(){
+  const list = el("admin-banned-list");
+  if (!list) return;
+  const entries = Object.entries(bannedCache).filter(([, v]) => v === true);
+  list.innerHTML = "";
+  el("admin-banned-empty").classList.toggle("hidden", entries.length > 0);
+  for (const [uid] of entries) {
+    const country = allCountries[uid];
+    const row = document.createElement("div");
+    row.className = "region-row";
+    row.innerHTML = `<span>${escapeHtml(country ? country.name + "(" + (country.discordName || "") + ")" : uid)}</span>`;
+    const releaseBtn = document.createElement("button");
+    releaseBtn.className = "btn btn-sm";
+    releaseBtn.textContent = "解除";
+    releaseBtn.onclick = async () => { await adminToggleBan(uid, false); renderBannedList(); };
+    row.appendChild(releaseBtn);
+    list.appendChild(row);
+  }
+}
+
+// ---------- 運営の管理(最高権力者のみ、Discord IDを直接指定) ----------
+function renderAdminManageSection(){
+  const heading = el("admin-manage-heading");
+  const section = el("admin-manage-section");
+  heading.classList.toggle("hidden", !isSupremeAdmin);
+  section.classList.toggle("hidden", !isSupremeAdmin);
+  if (!isSupremeAdmin) return;
+
+  const list = el("admin-list");
+  list.innerHTML = "";
+  const entries = Object.entries(allAdmins).filter(([, v]) => v === true);
+  for (const [uid] of entries) {
+    const country = allCountries[uid];
+    const row = document.createElement("div");
+    row.className = "region-row";
+    row.innerHTML = `<span>${escapeHtml(country ? country.name + "(" + (country.discordName || "") + ")" : uid)}${uid === SUPREME_ADMIN_UID ? " (最高権力者)" : ""}</span>`;
+    if (uid !== SUPREME_ADMIN_UID) {
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "btn btn-sm btn-danger";
+      removeBtn.textContent = "解除";
+      removeBtn.onclick = () => {
+        showConfirmModal("この人を運営から外しますか?", async () => { await supremeSetAdmin(uid, false); renderAdminManageSection(); });
+      };
+      row.appendChild(removeBtn);
+    }
+    list.appendChild(row);
+  }
+}
+el("promote-discord-id-btn").addEventListener("click", () => {
+  const uid = discordIdToUid(el("promote-discord-id-input").value);
+  if (!uid) { showToast("Discord IDを正しく入力してください(数字のみ)。", "error"); return; }
+  showConfirmModal(`Discord ID「${el("promote-discord-id-input").value.trim()}」を運営に追加しますか?`, async () => {
+    await supremeSetAdmin(uid, true);
+    el("promote-discord-id-input").value = "";
+    renderAdminManageSection();
+  });
+});
 
 function renderAdminTrashList(){
   const list = el("admin-trash-list");
