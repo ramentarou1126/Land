@@ -664,7 +664,7 @@ let countryClaimMode = false;
 let countryGroups = {};      // countryKey -> [regionId, ...]
 let regionCountryKey = {};   // regionId -> countryKey
 let countryDisplayNames = {}; // countryKey -> 表示名
-const MAX_CLAIMABLE_AREA_KM2 = 4000000; // これを超える区画(大陸規模)は主張禁止
+const MAX_CLAIMABLE_AREA_KM2 = 4000000; // これを超える区画(大陸規模)は主張禁止。ただし南極だけは例外
 const EARTH_SURFACE_KM2 = 510072000;
 
 function colorKey(hex){
@@ -843,22 +843,18 @@ async function initMapOnce() {
   window.__diag("地図データ読み込み完了: " + geo.features.length + "区画");
 
   const seenIds = {};
-  const dupNames = new Set();
-  for (const f of geo.features) {
-    const id = regionIdOf(f);
-    if (seenIds[id]) dupNames.add(regionNameOf(f) + "(id=" + id + ")");
-    seenIds[id] = true;
-  }
-  if (dupNames.size > 0) {
-    window.__diag("同じIDを持つ区画が" + dupNames.size + "件あります: " + Array.from(dupNames).join(", ") + " (これらは地図上で別々の場所でも、常に同じ持ち主・同じ色として連動します)", "error");
-  }
-
+  let dupCount = 0;
   restrictedRegionIds = new Set();
   for (const f of geo.features) {
     const id = regionIdOf(f);
     regionNames[id] = regionNameOf(f);
-    const areaKm2 = d3.geoArea(f) / (4 * Math.PI) * EARTH_SURFACE_KM2;
-    if (areaKm2 > MAX_CLAIMABLE_AREA_KM2) restrictedRegionIds.add(id);
+    if (seenIds[id]) dupCount++;
+    seenIds[id] = true;
+
+    if (!isAntarcticaFeature(f)) {
+      const areaKm2 = d3.geoArea(f) / (4 * Math.PI) * EARTH_SURFACE_KM2;
+      if (areaKm2 > MAX_CLAIMABLE_AREA_KM2) restrictedRegionIds.add(id);
+    }
 
     const key = countryKeyOf(f);
     if (key) {
@@ -867,15 +863,18 @@ async function initMapOnce() {
       if (!countryDisplayNames[key]) countryDisplayNames[key] = countryNameOf(f);
     }
   }
+  if (dupCount > 0) {
+    window.__diag("同じIDを持つ区画が" + dupCount + "件あります(地図データの重複。詳細は運営のみ表示のログには出しません)。");
+  }
   if (restrictedRegionIds.size > 0) {
-    window.__diag("大陸規模のため主張禁止に設定した区画: " + restrictedRegionIds.size + "件");
+    window.__diag("大陸規模のため主張禁止に設定した区画: " + restrictedRegionIds.size + "件(南極は例外的に主張可能です)");
   }
   if (Object.keys(countryGroups).length === 0) {
     window.__diag("地図データに国を示す属性(admin/sovereignt等)が見つからないため、国単位主張は使えません。", "error");
   }
   const adminInfo = el("admin-restricted-info");
   if (adminInfo) {
-    adminInfo.textContent = MAX_CLAIMABLE_AREA_KM2.toLocaleString() + "km²を超える区画は自動的に主張禁止になります(現在" + restrictedRegionIds.size + "件が対象)。";
+    adminInfo.textContent = MAX_CLAIMABLE_AREA_KM2.toLocaleString() + "km²を超える区画は自動的に主張禁止になります(南極は例外。現在" + restrictedRegionIds.size + "件が対象)。";
   }
 
   const projection = d3.geoNaturalEarth1().fitSize([width, height], geo);
@@ -901,7 +900,7 @@ async function initMapOnce() {
     })
     .on("mousemove", (event) => {
       const now = performance.now();
-      if (now - lastTooltipMove < 40) return; // 過剰な再描画を防ぐ簡易スロットル
+      if (now - lastTooltipMove < 80) return; // 過剰な再描画を防ぐ簡易スロットル
       lastTooltipMove = now;
       const target = event.target.closest("path[data-region-id]");
       if (!target) { hideTooltip(); return; }
@@ -911,9 +910,10 @@ async function initMapOnce() {
     .on("mouseleave", hideTooltip);
 
   svg.call(
-    d3.zoom().scaleExtent([1, 8]).on("zoom", (event) => {
-      g.attr("transform", event.transform);
-    })
+    d3.zoom().scaleExtent([1, 8])
+      .on("start", () => { g.style("pointer-events", "none"); })
+      .on("zoom", (event) => { g.attr("transform", event.transform); })
+      .on("end", () => { g.style("pointer-events", null); })
   ).on("dblclick.zoom", null); // 連打(ダブルクリック/ダブルタップ)によるズームを無効化
 
   applyClaimColors();
@@ -931,6 +931,11 @@ function countryKeyOf(f){
 function countryNameOf(f){
   const p = f.properties || {};
   return p.admin || p.sovereignt || countryKeyOf(f);
+}
+function isAntarcticaFeature(f){
+  const p = f.properties || {};
+  const text = [p.admin, p.sovereignt, p.name, p.iso_a2, p.adm0_a3].filter(Boolean).join(" ").toLowerCase();
+  return text.includes("antarctica") || text === "aq" || text.includes(" aq ") || p.iso_a2 === "AQ" || p.adm0_a3 === "ATA";
 }
 
 function showTooltip(event, regionId, name){
