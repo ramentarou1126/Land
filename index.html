@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>麺Earth 領土主張</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
@@ -56,6 +56,7 @@
   h1,h2,.display{ font-family:"Space Grotesk","Noto Sans JP",sans-serif; font-weight:700; letter-spacing:.01em; }
   .mono{ font-family:"JetBrains Mono", monospace; }
   button, input{ font-family:inherit; }
+  button{ touch-action: manipulation; } /* ボタン連打によるダブルタップ拡大を防止 */
 
   .grid-bg{
     position:fixed; inset:0; z-index:-1;
@@ -257,7 +258,20 @@
   .side-menu hr{ border:none; border-top:1px solid var(--border); margin:22px 0; }
   .stat-line{ font-size:13px; color:var(--text-dim); }
   .stat-line b{ color:var(--text); font-family:"JetBrains Mono",monospace; font-weight:500; }
-  .region-list{ max-height:180px; overflow-y:auto; margin-top:8px; }
+  .region-list{ position:relative; max-height:180px; overflow-y:auto; margin-top:8px; }
+  .region-list::after{
+    content:""; position:sticky; display:block; left:0; right:0; bottom:0; height:16px; margin-top:-16px;
+    background: linear-gradient(to bottom, transparent, var(--panel-solid));
+    pointer-events:none;
+  }
+  .scroll-hint{ font-size:11px; color:var(--text-dim); margin:4px 0 0; }
+
+  /* スクロール可能な箇所であることが分かるよう、常に細いスクロールバーを表示 */
+  *{ scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  *::-webkit-scrollbar{ width:7px; height:7px; }
+  *::-webkit-scrollbar-track{ background:transparent; }
+  *::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
+  *::-webkit-scrollbar-thumb:hover{ background:var(--cyan-dim); }
   .region-row{ display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
   .theme-row{ display:flex; gap:8px; }
   .theme-row .btn{ flex:1; }
@@ -531,7 +545,9 @@
       </div>
       <button id="edit-save-btn" class="btn btn-fill btn-block">変更を保存</button>
       <hr>
-      <p class="stat-line">治めている区画: <b id="edit-region-count" class="mono">0</b></p>
+      <p class="stat-line">主張している区画: <b id="edit-region-count" class="mono">0</b></p>
+      <div id="edit-country-release-list" class="region-list"></div>
+      <p class="hint scroll-hint">下にスクロールすると区画ごとの一覧があります</p>
       <div id="edit-region-list" class="region-list"></div>
       <button id="edit-delete-country-btn" class="btn btn-danger btn-block">建国を取り消す(すべての領土を解放)</button>
     </div>
@@ -914,6 +930,8 @@ async function initMapOnce() {
 
   svg.call(
     d3.zoom().scaleExtent([1, 8])
+      .translateExtent([[0, 0], [width, height]]) // 世界地図の外側までパンできないよう範囲を制限
+      .extent([[0, 0], [width, height]])
       .on("start", () => { g.style("pointer-events", "none"); })
       .on("zoom", (event) => { g.attr("transform", event.transform); })
       .on("end", () => { g.style("pointer-events", null); })
@@ -1178,8 +1196,8 @@ function escapeHtml(s){
 
 // ---------- 国家リスト ----------
 el("nation-open-btn").addEventListener("click", () => {
-  renderNationList();
   el("nation-panel").classList.remove("hidden");
+  renderNationList();
 });
 el("nation-close-btn").addEventListener("click", () => el("nation-panel").classList.add("hidden"));
 el("nation-clear-highlight-btn").addEventListener("click", () => {
@@ -1197,6 +1215,7 @@ function toggleHighlight(uid){
 function renderNationList(){
   const list = el("nation-list");
   if (!list) return;
+  if (el("nation-panel").classList.contains("hidden")) return; // 非表示中は再構築しない(負荷軽減)
   const entries = Object.entries(allCountries);
   list.innerHTML = "";
   el("nation-empty").classList.toggle("hidden", entries.length > 0);
@@ -1217,11 +1236,11 @@ function renderNationList(){
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 el("admin-open-btn").addEventListener("click", () => {
+  el("admin-panel").classList.remove("hidden");
   renderAdminTrashList();
   renderAdminCountryList();
   renderBannedList();
   renderAdminManageSection();
-  el("admin-panel").classList.remove("hidden");
 });
 el("admin-close-btn").addEventListener("click", () => el("admin-panel").classList.add("hidden"));
 
@@ -1244,7 +1263,7 @@ el("ban-discord-id-btn").addEventListener("click", () => {
 
 function renderBannedList(){
   const list = el("admin-banned-list");
-  if (!list) return;
+  if (!list || el("admin-panel").classList.contains("hidden")) return; // 非表示中は再構築しない(負荷軽減)
   const entries = Object.entries(bannedCache).filter(([, v]) => v === true);
   list.innerHTML = "";
   el("admin-banned-empty").classList.toggle("hidden", entries.length > 0);
@@ -1264,6 +1283,7 @@ function renderBannedList(){
 
 // ---------- 運営の管理(最高権力者のみ、Discord IDを直接指定) ----------
 function renderAdminManageSection(){
+  if (el("admin-panel").classList.contains("hidden")) return; // 非表示中は再構築しない(負荷軽減)
   const heading = el("admin-manage-heading");
   const section = el("admin-manage-section");
   heading.classList.toggle("hidden", !isSupremeAdmin);
@@ -1302,6 +1322,7 @@ el("promote-discord-id-btn").addEventListener("click", () => {
 
 function renderAdminTrashList(){
   const list = el("admin-trash-list");
+  if (el("admin-panel").classList.contains("hidden")) return; // 非表示中は再構築しない(負荷軽減)
   const entries = Object.entries(trashCache).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
   list.innerHTML = "";
   el("admin-trash-empty").classList.toggle("hidden", entries.length > 0);
@@ -1322,7 +1343,7 @@ function renderAdminTrashList(){
 
 function renderAdminCountryList(){
   const list = el("admin-country-list");
-  if (!list) return;
+  if (!list || el("admin-panel").classList.contains("hidden")) return; // 非表示中は再構築しない(負荷軽減)
   const entries = Object.entries(allCountries);
   list.innerHTML = "";
   el("admin-country-empty").classList.toggle("hidden", entries.length > 0);
@@ -1720,7 +1741,7 @@ function tooCloseReason(hex){
 }
 
 // ---------- 自国の管理(サイドメニュー) ----------
-el("menu-btn").addEventListener("click", () => { renderSideMenu(); el("side-menu").classList.remove("hidden"); });
+el("menu-btn").addEventListener("click", () => { el("side-menu").classList.remove("hidden"); renderSideMenu(); });
 el("menu-close-btn").addEventListener("click", () => el("side-menu").classList.add("hidden"));
 el("menu-create-country-btn").addEventListener("click", () => { el("side-menu").classList.add("hidden"); openClaimModal(); });
 
@@ -1737,6 +1758,7 @@ el("theme-dark-btn").addEventListener("click", () => applyTheme("dark"));
 el("theme-light-btn").addEventListener("click", () => applyTheme("light"));
 
 function renderSideMenu(){
+  if (el("side-menu").classList.contains("hidden")) return; // 非表示中は再構築しない(負荷軽減)
   const has = !!myCountry;
   applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
   el("menu-no-country").classList.toggle("hidden", has);
@@ -1756,6 +1778,29 @@ function renderSideMenu(){
     groups.get(key).push(regionId);
   }
 
+  // 上段: 国ごとにまとめて解放できる一覧(スクロールせずに一目で分かるよう最上部にまとめる)
+  const releaseList = el("edit-country-release-list");
+  releaseList.innerHTML = "";
+  let hasCountryGroup = false;
+  for (const [key, regionIds] of groups) {
+    if (!key) continue;
+    hasCountryGroup = true;
+    const groupLabel = countryDisplayNames[key] || key;
+    const row = document.createElement("div");
+    row.className = "region-row";
+    row.innerHTML = `<span>${escapeHtml(groupLabel)}(${regionIds.length}区画)</span>`;
+    const releaseGroupBtn = document.createElement("button");
+    releaseGroupBtn.className = "btn btn-sm btn-danger";
+    releaseGroupBtn.textContent = "国ごと解放";
+    releaseGroupBtn.onclick = () => {
+      showConfirmModal(`「${groupLabel}」の${regionIds.length}区画をまとめて解放しますか?`, () => releaseOwnRegions(regionIds, groupLabel));
+    };
+    row.appendChild(releaseGroupBtn);
+    releaseList.appendChild(row);
+  }
+  el("edit-country-release-list").classList.toggle("hidden", !hasCountryGroup);
+
+  // 下段: 区画ごとの一覧(個別解放)
   const list = el("edit-region-list");
   list.innerHTML = "";
   for (const [key, regionIds] of groups) {
@@ -1764,14 +1809,8 @@ function renderSideMenu(){
       const header = document.createElement("div");
       header.className = "region-row";
       header.style.fontWeight = "500";
-      header.innerHTML = `<span>${escapeHtml(groupLabel)}(${regionIds.length}区画)</span>`;
-      const releaseGroupBtn = document.createElement("button");
-      releaseGroupBtn.className = "btn btn-sm btn-danger";
-      releaseGroupBtn.textContent = "国ごと解放";
-      releaseGroupBtn.onclick = () => {
-        showConfirmModal(`「${groupLabel}」の${regionIds.length}区画をまとめて解放しますか?`, () => releaseOwnRegions(regionIds, groupLabel));
-      };
-      header.appendChild(releaseGroupBtn);
+      header.style.color = "var(--text-dim)";
+      header.innerHTML = `<span>${escapeHtml(groupLabel)}</span>`;
       list.appendChild(header);
     }
     for (const regionId of regionIds) {
