@@ -470,7 +470,8 @@ async function handleTokenFromUrl() {
   }
   const token = params.get("token");
   if (token) {
-    window.__diag("URLにログイントークンを検出。Firebase認証を試みます。");
+    window.__diag("URLにログイントークンを検出。中身を検証します。");
+    inspectJwt(token);
     try {
       await signInWithCustomToken(auth, token);
       window.__diag("Firebase認証: 成功");
@@ -483,6 +484,56 @@ async function handleTokenFromUrl() {
     history.replaceState({}, "", newUrl);
   } else {
     window.__diag("URLにログイントークンなし(未ログイン状態として表示)");
+  }
+}
+
+function base64UrlDecode(str){
+  str = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (str.length % 4) str += "=";
+  return decodeURIComponent(
+    atob(str).split("").map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")).join("")
+  );
+}
+
+function inspectJwt(token){
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) {
+      window.__diag("トークン形式が不正です(ドット区切りが3つではありません)。Worker側のトークン生成を確認してください。", "error");
+      return;
+    }
+    const header = JSON.parse(base64UrlDecode(parts[0]));
+    const payload = JSON.parse(base64UrlDecode(parts[1]));
+    window.__diag("トークン header.alg = " + header.alg);
+    window.__diag("トークン iss(発行者) = " + payload.iss);
+    window.__diag("トークン sub = " + payload.sub);
+    window.__diag("トークン aud = " + payload.aud);
+    window.__diag("トークン uid = " + payload.uid);
+
+    const now = Math.floor(Date.now() / 1000);
+    const iatDate = payload.iat ? new Date(payload.iat * 1000).toLocaleString("ja-JP") : "なし";
+    const expDate = payload.exp ? new Date(payload.exp * 1000).toLocaleString("ja-JP") : "なし";
+    window.__diag("トークン iat(発行時刻) = " + iatDate + " / exp(期限) = " + expDate);
+    window.__diag("現在時刻(このブラウザ) = " + new Date(now * 1000).toLocaleString("ja-JP"));
+    if (payload.exp && now > payload.exp) {
+      window.__diag("トークンの有効期限が過ぎています(端末の時刻がずれていないか確認してください)", "error");
+    }
+    if (payload.iat && now < payload.iat - 60) {
+      window.__diag("トークンの発行時刻が未来になっています(端末またはWorker側の時刻がずれています)", "error");
+    }
+
+    const expectedAud = "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit";
+    if (payload.aud !== expectedAud) {
+      window.__diag("audが想定値と一致しません。想定: " + expectedAud, "error");
+    }
+    if (!payload.iss || !payload.iss.endsWith(".iam.gserviceaccount.com")) {
+      window.__diag("issの形式が不正です(サービスアカウントのメールアドレス形式になっていません)", "error");
+    }
+    if (payload.iss !== payload.sub) {
+      window.__diag("issとsubが一致していません(通常は同じサービスアカウントメールである必要があります)", "error");
+    }
+  } catch (e) {
+    window.__diag("トークンの解析に失敗: " + e.message, "error");
   }
 }
 
