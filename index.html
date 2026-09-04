@@ -141,7 +141,12 @@
   .icon-btn.active{ color:var(--cyan); border-color:var(--cyan-dim); background:rgba(79,227,208,0.12); }
 
   #map-wrap{ position:relative; flex:1; overflow:hidden; background: var(--map-ocean); }
-  #map-svg{ width:100%; height:100%; cursor:grab; display:block; shape-rendering: optimizeSpeed; }
+  #map-loading{
+    position:absolute; inset:0; z-index:40;
+    display:flex; align-items:center; justify-content:center;
+    background: var(--panel-solid); color: var(--text-dim); font-size:13px;
+  }
+  #map-svg{ width:100%; height:100%; cursor:grab; display:block; shape-rendering: optimizeSpeed; touch-action: none; }
   #map-svg:active{ cursor:grabbing; }
   #map-svg path{
     stroke: var(--land-line);
@@ -371,6 +376,17 @@
   </div>
 </div>
 
+<!-- メンテナンス画面(運営のみログイン許可がONの場合) -->
+<div id="maintenance-screen" class="screen hidden">
+  <div class="login-card hud">
+    <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
+    <span class="corner corner-bl"></span><span class="corner corner-br"></span>
+    <div class="badge">麺</div>
+    <h1>現在メンテナンス中です</h1>
+    <p>運営のみアクセスできる状態になっています。しばらくしてから再度お試しください。</p>
+  </div>
+</div>
+
 <!-- メイン画面 -->
 <div id="app" class="hidden">
 
@@ -393,6 +409,7 @@
 
   <div id="map-wrap">
     <svg id="map-svg"></svg>
+    <div id="map-loading">地図を読み込み中...</div>
     <div id="hover-tooltip" class="tooltip hidden"></div>
 
     <div id="empty-hint" class="hud hidden">
@@ -522,6 +539,10 @@
       <button id="admin-close-btn" class="icon-btn" aria-label="閉じる">×</button>
     </div>
 
+    <h3>アクセス制限</h3>
+    <p class="hint">ONにすると運営以外はログイン後すぐにブロックされ、地図やデータを見られなくなります。</p>
+    <button id="admin-only-toggle-btn" class="btn btn-block">読み込み中...</button>
+
     <h3>領土のリセット</h3>
     <p class="hint">実行しても30日間はゴミ箱から復元できます。</p>
     <button id="admin-reset-claims-btn" class="btn btn-danger btn-block">領土だけリセット(国は残す)</button>
@@ -533,7 +554,7 @@
     <button id="admin-purge-expired-btn" class="btn btn-sm">期限切れをまとめて完全削除</button>
 
     <h3>国の一覧</h3>
-    <p class="hint">運営の追加はFirebaseコンソールから手動でのみ行えます(セキュリティのため、運営自身が他の運営を追加することはできません)。</p>
+    <p class="hint">運営の追加・削除は最高権力者だけが行えます(この国の一覧に運営管理ボタンが表示されます)。</p>
     <div id="admin-country-list"></div>
     <div id="admin-country-empty" class="admin-empty">まだ国はありません。</div>
 
@@ -580,6 +601,10 @@ let pathSelection = null;
 let pendingRegionId = null;
 let mapInitialized = false;
 let isAdmin = false;
+let adminOnlyMode = false;
+const SUPREME_ADMIN_UID = "discord:1235820512752566374";
+let isSupremeAdmin = false;
+let allAdmins = {};
 let allCountries = {};
 let takenColors = {};
 let trashCache = {};
@@ -735,6 +760,9 @@ onAuthStateChanged(auth, async (user) => {
     watchAdminStatus();
     watchAllCountries();
     watchBanned();
+    watchSettings();
+    isSupremeAdmin = currentUser.uid === SUPREME_ADMIN_UID;
+    if (isSupremeAdmin) watchAllAdmins();
   } else {
     el("app").classList.add("hidden");
     el("app").style.display = "none";
@@ -759,6 +787,7 @@ async function initMapOnce() {
     topo = await res.json();
   } catch (e) {
     window.__diag("地図データの読み込みに失敗: " + e.message + "(data/admin1.jsonが配置されているか確認してください)", "error");
+    el("map-loading").textContent = "地図の読み込みに失敗しました";
     return;
   }
   const objectKey = Object.keys(topo.objects)[0];
@@ -803,7 +832,7 @@ async function initMapOnce() {
 
   const projection = d3.geoNaturalEarth1().fitSize([width, height], geo);
   const path = d3.geoPath().projection(projection);
-  const g = svg.append("g");
+  const g = svg.append("g").style("will-change", "transform");
 
   pathSelection = g.selectAll("path")
     .data(geo.features)
@@ -823,6 +852,7 @@ async function initMapOnce() {
   ).on("dblclick.zoom", null); // 連打(ダブルクリック/ダブルタップ)によるズームを無効化
 
   applyClaimColors();
+  el("map-loading").classList.add("hidden");
 }
 
 function regionIdOf(f){
@@ -862,6 +892,14 @@ function applyClaimColors(){
       if (restrictedRegionIds.has(id)) return null;
       const claim = claimsCache[id];
       return claim ? claim.color : null;
+    })
+    .style("stroke", (d) => {
+      const id = regionIdOf(d);
+      if (restrictedRegionIds.has(id)) return null;
+      const claim = claimsCache[id];
+      if (!claim) return null;
+      const c = d3.color(claim.color);
+      return c ? c.darker(0.6) : claim.color;
     })
     .classed("is-claimed", (d) => !!claimsCache[regionIdOf(d)])
     .classed("is-highlighted", (d) => {
@@ -907,14 +945,87 @@ function watchColors(){
 
 function watchAdminStatus(){
   onValue(ref(db, `admins/${currentUser.uid}`), (snap) => {
-    isAdmin = snap.val() === true;
+    isAdmin = snap.val() === true || isSupremeAdmin;
     el("admin-open-btn").classList.toggle("hidden", !isAdmin);
     if (isAdmin) watchTrash();
+    applyMaintenanceGate();
   }, (error) => {
     // 権限エラーは想定内(admins自体は誰でも読めるルールだが念のため)
     window.__diag("admins読み取りに失敗: [" + error.code + "] " + error.message, "error");
+    if (isSupremeAdmin) {
+      isAdmin = true;
+      el("admin-open-btn").classList.remove("hidden");
+      watchTrash();
+      applyMaintenanceGate();
+    }
   });
 }
+
+function watchSettings(){
+  onValue(ref(db, "settings/adminOnly"), (snap) => {
+    adminOnlyMode = snap.val() === true;
+    applyMaintenanceGate();
+    updateAdminOnlyButton();
+  }, (error) => {
+    window.__diag("settings読み取りに失敗: [" + error.code + "] " + error.message, "error");
+  });
+}
+
+let allAdminsWatching = false;
+function watchAllAdmins(){
+  if (allAdminsWatching) return;
+  allAdminsWatching = true;
+  onValue(ref(db, "admins"), (snap) => {
+    allAdmins = snap.val() || {};
+    renderAdminCountryList();
+  }, (error) => {
+    window.__diag("admins一覧の読み取りに失敗: [" + error.code + "] " + error.message, "error");
+  });
+}
+
+async function supremeSetAdmin(uid, makeAdmin){
+  try {
+    await set(ref(db, `admins/${uid}`), makeAdmin ? true : null);
+    showToast(makeAdmin ? "運営に追加しました" : "運営から外しました");
+  } catch (e) {
+    showToast("操作に失敗しました: " + e.message, "error");
+  }
+}
+
+function applyMaintenanceGate(){
+  if (!currentUser) return;
+  if (adminOnlyMode && !isAdmin) {
+    el("app").classList.add("hidden");
+    el("app").style.display = "none";
+    el("login-screen").classList.add("hidden");
+    el("maintenance-screen").classList.remove("hidden");
+  } else {
+    el("maintenance-screen").classList.add("hidden");
+    el("app").classList.remove("hidden");
+    el("app").style.display = "flex";
+  }
+}
+
+function updateAdminOnlyButton(){
+  const btn = el("admin-only-toggle-btn");
+  if (!btn) return;
+  btn.textContent = adminOnlyMode ? "運営のみログイン許可: ON(タップでOFFに)" : "運営のみログイン許可: OFF(タップでONに)";
+  btn.classList.toggle("btn-danger", adminOnlyMode);
+}
+el("admin-only-toggle-btn").addEventListener("click", () => {
+  const next = !adminOnlyMode;
+  const msg = next
+    ? "運営以外ログインできない状態にします。よろしいですか?"
+    : "制限を解除し、全員がアクセスできるようにします。よろしいですか?";
+  showConfirmModal(msg, async () => {
+    try {
+      await set(ref(db, "settings/adminOnly"), next);
+      showToast(next ? "運営のみアクセス可能にしました" : "制限を解除しました");
+    } catch (e) {
+      showToast("変更に失敗しました: " + e.message, "error");
+    }
+  });
+});
 
 function watchBanned(){
   onValue(ref(db, "banned"), (snap) => {
@@ -1058,11 +1169,11 @@ function renderAdminCountryList(){
   for (const [uid, country] of entries) {
     const count = Object.values(claimsCache).filter((c) => c.ownerUid === uid).length;
     const isBanned = !!bannedCache[uid];
-    const isAdminUser = false; // admins一覧は別ノードなので個別チェックが必要な場合はここに追加
+    const isCurrentlyAdmin = !!allAdmins[uid];
     const row = document.createElement("div");
     row.className = "admin-row";
     row.innerHTML = `<span class="swatch" style="background:${country.color}"></span>
-      <span class="grow">${escapeHtml(country.name)}${isBanned ? " (禁止中)" : ""}<br><span class="meta">${escapeHtml(country.discordName || "")} ・ ${count}区画</span></span>`;
+      <span class="grow">${escapeHtml(country.name)}${isBanned ? " (禁止中)" : ""}${isCurrentlyAdmin ? " (運営)" : ""}<br><span class="meta">${escapeHtml(country.discordName || "")} ・ ${count}区画</span></span>`;
 
     const btnGroup = document.createElement("div");
     btnGroup.className = "btn-group";
@@ -1083,6 +1194,19 @@ function renderAdminCountryList(){
       showConfirmModal(msg, () => adminToggleBan(uid, !isBanned));
     };
     btnGroup.appendChild(banBtn);
+
+    if (isSupremeAdmin && uid !== SUPREME_ADMIN_UID) {
+      const adminBtn = document.createElement("button");
+      adminBtn.className = "btn btn-sm" + (isCurrentlyAdmin ? " btn-danger" : "");
+      adminBtn.textContent = isCurrentlyAdmin ? "運営解除" : "運営にする";
+      adminBtn.onclick = () => {
+        const msg = isCurrentlyAdmin
+          ? `「${country.discordName || country.name}」を運営から外しますか?`
+          : `「${country.discordName || country.name}」を運営に追加しますか?`;
+        showConfirmModal(msg, () => supremeSetAdmin(uid, !isCurrentlyAdmin));
+      };
+      btnGroup.appendChild(adminBtn);
+    }
 
     const delBtn = document.createElement("button");
     delBtn.className = "btn btn-sm btn-danger";
