@@ -246,6 +246,58 @@
 <body>
 <div class="grid-bg"></div>
 
+<!-- 診断ログ(コンソールが見られない環境向け) -->
+<div id="diag-panel" class="hud" style="position:fixed; left:12px; bottom:54px; width:min(360px,86vw); max-height:280px; overflow-y:auto; background:var(--panel-solid); border:1px solid var(--border); z-index:200; padding:12px 14px; display:none;">
+  <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
+  <span class="corner corner-bl"></span><span class="corner corner-br"></span>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <strong style="font-size:12.5px;">診断ログ</strong>
+    <button id="diag-close-btn" class="icon-btn" style="font-size:16px; padding:0 6px;">×</button>
+  </div>
+  <div id="diag-lines" class="mono" style="white-space:pre-wrap; line-height:1.7; font-size:11px; color:var(--text-dim);"></div>
+</div>
+<button id="diag-toggle-btn" class="icon-btn" title="診断ログを表示"
+  style="position:fixed; left:12px; bottom:12px; z-index:199; background:var(--panel-solid); border:1px solid var(--border); width:34px; height:34px; padding:0; font-size:16px;">i</button>
+
+<script>
+(function(){
+  window.__diag = function(msg, level){
+    level = level || "info";
+    var time = new Date().toLocaleTimeString("ja-JP", { hour12:false });
+    var line = "[" + time + "] " + (level === "error" ? "⚠ " : "") + msg;
+    var box = document.getElementById("diag-lines");
+    if (box) {
+      var p = document.createElement("div");
+      p.textContent = line;
+      if (level === "error") p.style.color = "#FF5C72";
+      box.appendChild(p);
+      box.scrollTop = box.scrollHeight;
+    }
+    if (level === "error") {
+      var btn = document.getElementById("diag-toggle-btn");
+      if (btn) { btn.style.borderColor = "#FF5C72"; btn.style.color = "#FF5C72"; }
+      var panel = document.getElementById("diag-panel");
+      if (panel) panel.style.display = "block";
+    }
+  };
+  window.addEventListener("error", function(e){
+    window.__diag("スクリプトエラー: " + (e.message || e.error), "error");
+  });
+  window.addEventListener("unhandledrejection", function(e){
+    var reason = (e.reason && e.reason.message) ? e.reason.message : String(e.reason);
+    window.__diag("未処理のエラー: " + reason, "error");
+  });
+  document.getElementById("diag-toggle-btn").addEventListener("click", function(){
+    var p = document.getElementById("diag-panel");
+    p.style.display = (p.style.display === "none") ? "block" : "none";
+  });
+  document.getElementById("diag-close-btn").addEventListener("click", function(){
+    document.getElementById("diag-panel").style.display = "none";
+  });
+  window.__diag("ページ読み込み開始");
+})();
+</script>
+
 <!-- ログインゲート -->
 <div id="login-screen" class="screen">
   <div class="login-card hud">
@@ -409,27 +461,41 @@ const el = (id) => document.getElementById(id);
 // ---------- 認証 ----------
 async function handleTokenFromUrl() {
   const params = new URLSearchParams(location.search);
+  const authError = params.get("auth_error");
+  if (authError) {
+    window.__diag("Discordログイン処理でエラー(Worker側): " + authError, "error");
+    params.delete("auth_error");
+    history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params.toString() : ""));
+    return;
+  }
   const token = params.get("token");
   if (token) {
+    window.__diag("URLにログイントークンを検出。Firebase認証を試みます。");
     try {
       await signInWithCustomToken(auth, token);
+      window.__diag("Firebase認証: 成功");
     } catch (e) {
-      console.error("ログイン失敗:", e);
+      window.__diag("Firebase認証: 失敗 [" + (e.code || "?") + "] " + e.message, "error");
       alert("ログインに失敗しました。もう一度お試しください。");
     }
     params.delete("token");
     const newUrl = location.pathname + (params.toString() ? "?" + params.toString() : "");
     history.replaceState({}, "", newUrl);
+  } else {
+    window.__diag("URLにログイントークンなし(未ログイン状態として表示)");
   }
 }
 
 el("discord-login-btn").addEventListener("click", () => {
   const redirect = encodeURIComponent(location.origin + location.pathname);
-  location.href = `${WORKER_BASE_URL}/auth?redirect=${redirect}`;
+  const url = `${WORKER_BASE_URL}/auth?redirect=${redirect}`;
+  window.__diag("Discordログインへ遷移: " + url);
+  location.href = url;
 });
 
 onAuthStateChanged(auth, async (user) => {
   currentUser = user;
+  window.__diag("認証状態の変化: " + (user ? "ログイン中(uid=" + user.uid + ")" : "未ログイン"));
   if (user) {
     el("login-screen").classList.add("hidden");
     el("app").classList.remove("hidden");
@@ -461,9 +527,19 @@ async function initMapOnce() {
   const width = svg.node().clientWidth || 960;
   const height = svg.node().clientHeight || 600;
 
-  const topo = await (await fetch(MAP_DATA_URL)).json();
+  window.__diag("地図データを読み込み中: " + MAP_DATA_URL);
+  let topo;
+  try {
+    const res = await fetch(MAP_DATA_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    topo = await res.json();
+  } catch (e) {
+    window.__diag("地図データの読み込みに失敗: " + e.message + "(data/admin1.jsonが配置されているか確認してください)", "error");
+    return;
+  }
   const objectKey = Object.keys(topo.objects)[0];
   const geo = topojson.feature(topo, topo.objects[objectKey]);
+  window.__diag("地図データ読み込み完了: " + geo.features.length + "区画");
 
   const projection = d3.geoNaturalEarth1().fitSize([width, height], geo);
   const path = d3.geoPath().projection(projection);
@@ -526,6 +602,8 @@ function watchMyCountry(){
     renderTopBar();
     renderSideMenu();
     renderEmptyHint();
+  }, (error) => {
+    window.__diag("countriesの読み取りに失敗: [" + error.code + "] " + error.message + "(Realtime Databaseのルールを確認してください)", "error");
   });
 }
 function watchClaims(){
@@ -534,6 +612,8 @@ function watchClaims(){
     applyClaimColors();
     renderSideMenu();
     renderLegend();
+  }, (error) => {
+    window.__diag("claimsの読み取りに失敗: [" + error.code + "] " + error.message + "(Realtime Databaseのルールを確認してください)", "error");
   });
 }
 
