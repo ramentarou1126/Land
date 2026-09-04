@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<html<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>麺Earth 領土管制</title>
+<title>麺Earth 領土主張</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
@@ -25,8 +24,21 @@
     --danger: #FF5C72;
     --text: #E7ECFF;
     --text-dim: #7E8AB8;
-    --land: #182140;
-    --land-line: rgba(120,170,255,0.18);
+    --map-ocean: #1B5FA8;
+    --land: #F4F7FB;
+    --land-line: rgba(20,50,90,0.35);
+    --land-restricted: #B9C2CC;
+  }
+
+  html[data-theme="light"]{
+    --void: #EEF2F8;
+    --void-deep: #E4E9F2;
+    --panel: rgba(255,255,255,0.85);
+    --panel-solid: #FFFFFF;
+    --grid-line: rgba(30,60,110,0.06);
+    --border: rgba(30,60,110,0.16);
+    --text: #1B2436;
+    --text-dim: #5C6B85;
   }
 
   *{ box-sizing:border-box; }
@@ -124,17 +136,20 @@
   }
   .icon-btn:hover{ border-color: var(--border); color:var(--cyan); }
 
-  #map-wrap{ position:relative; flex:1; overflow:hidden; background: var(--void-deep); }
-  #map-svg{ width:100%; height:100%; cursor:grab; display:block; }
+  #map-wrap{ position:relative; flex:1; overflow:hidden; background: var(--map-ocean); }
+  #map-svg{ width:100%; height:100%; cursor:grab; display:block; shape-rendering: optimizeSpeed; }
   #map-svg:active{ cursor:grabbing; }
   #map-svg path{
     stroke: var(--land-line);
     stroke-width: 0.4;
     fill: var(--land);
-    transition: fill .12s, filter .12s;
   }
-  #map-svg path:hover{ filter: brightness(1.3); stroke: var(--cyan); stroke-width:0.8; }
-  #map-svg path.is-claimed{ stroke: rgba(255,255,255,0.25); }
+  #map-svg path:hover{ fill: #D9E6F5; stroke: var(--cyan); stroke-width:0.8; }
+  #map-svg path.is-claimed{ stroke: rgba(20,30,50,0.35); stroke-width: 0.6; }
+  #map-svg path.is-restricted{ fill: var(--land-restricted) !important; cursor: not-allowed; }
+  #map-svg path.is-restricted:hover{ fill: var(--land-restricted) !important; stroke: var(--land-line); stroke-width:0.4; }
+  #map-svg path.is-highlighted{ stroke: #FFFFFF; stroke-width: 1.6; }
+  #map-svg path.is-dimmed{ opacity: 0.35; }
 
   .tooltip{
     position:absolute; pointer-events:none;
@@ -233,8 +248,45 @@
   .side-menu hr{ border:none; border-top:1px solid var(--border); margin:22px 0; }
   .stat-line{ font-size:13px; color:var(--text-dim); }
   .stat-line b{ color:var(--text); font-family:"JetBrains Mono",monospace; font-weight:500; }
+  .region-list{ max-height:180px; overflow-y:auto; margin-top:8px; }
+  .region-row{ display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
+  .theme-row{ display:flex; gap:8px; }
+  .theme-row .btn{ flex:1; }
+  .theme-row .btn.active{ border-color:var(--cyan); box-shadow:0 0 0 1px var(--cyan-dim) inset; }
 
   .hidden{ display:none !important; }
+
+  #toast-wrap{ position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:300; display:flex; flex-direction:column; gap:8px; align-items:center; }
+  .toast{
+    background: var(--panel-solid); border:1px solid var(--border); border-left:3px solid var(--cyan);
+    color: var(--text); padding:10px 18px; font-size:13px;
+    opacity:0; transform:translateY(-8px); transition: opacity .2s, transform .2s;
+    max-width: 86vw;
+  }
+  .toast.show{ opacity:1; transform:translateY(0); }
+  .toast.toast-error{ border-left-color: var(--danger); }
+
+  #admin-panel{
+    position:fixed; top:0; left:0; bottom:0;
+    width:360px; max-width:92vw;
+    background: var(--panel-solid); color:var(--text);
+    border-right:1px solid var(--border);
+    padding:24px 26px; z-index:90; overflow-y:auto;
+  }
+  #admin-panel h2{ margin:0; font-size:18px; }
+  #admin-panel h3{ margin:22px 0 8px; font-size:13px; color:var(--text-dim); font-weight:500; }
+  #admin-panel .side-menu-header{ margin-bottom:6px; }
+  #admin-panel p.hint{ font-size:12px; color:var(--text-dim); line-height:1.7; margin:0 0 10px; }
+  .admin-row{
+    display:flex; align-items:center; gap:8px; padding:8px 0; flex-wrap:wrap;
+    border-bottom:1px solid var(--border); font-size:12.5px;
+  }
+  .admin-row .btn-group{ display:flex; gap:6px; flex-wrap:wrap; margin-left:auto; }
+  .admin-row:last-child{ border-bottom:none; }
+  .admin-row .swatch{ width:11px; height:11px; flex-shrink:0; }
+  .admin-row .grow{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .admin-row .meta{ color:var(--text-dim); font-size:11px; }
+  .admin-empty{ font-size:12px; color:var(--text-dim); padding:8px 0; }
 
   @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
 
@@ -262,6 +314,10 @@
 
 <script>
 (function(){
+  var savedTheme = localStorage.getItem("menearth_theme");
+  if (savedTheme === "light" || savedTheme === "dark") {
+    document.documentElement.setAttribute("data-theme", savedTheme);
+  }
   window.__diag = function(msg, level){
     level = level || "info";
     var time = new Date().toLocaleTimeString("ja-JP", { hour12:false });
@@ -305,7 +361,7 @@
     <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
     <span class="corner corner-bl"></span><span class="corner corner-br"></span>
     <div class="badge">麺</div>
-    <h1>麺Earth 領土管制</h1>
+    <h1>麺Earth 領土主張</h1>
     <p>このマップを開くにはDiscord認証が必要です。<br>認証後、国を興して地図の区画を治められます。</p>
     <button id="discord-login-btn" class="btn btn-fill btn-block">Discordでログイン</button>
   </div>
@@ -318,11 +374,13 @@
     <div id="top-bar-left">
       <div class="badge">麺</div>
       <div>
-        <h1 id="site-title">麺Earth 領土管制</h1>
+        <h1 id="site-title">麺Earth 領土主張</h1>
         <div id="user-tag" class="mono"></div>
       </div>
     </div>
     <div id="top-bar-right">
+      <button id="admin-open-btn" class="icon-btn hidden" title="運営パネル" aria-label="運営パネル">⚙</button>
+      <button id="nation-open-btn" class="icon-btn" title="国家リスト" aria-label="国家リスト">🏳</button>
       <button id="found-nation-btn" class="btn btn-fill hidden">建国する</button>
       <button id="menu-btn" class="icon-btn" title="自国の管理" aria-label="自国の管理">☰</button>
     </div>
@@ -399,6 +457,13 @@
       <button id="menu-close-btn" class="icon-btn" aria-label="閉じる">×</button>
     </div>
 
+    <label>表示モード</label>
+    <div class="theme-row">
+      <button id="theme-dark-btn" class="btn btn-sm">ダーク</button>
+      <button id="theme-light-btn" class="btn btn-sm">ホワイト</button>
+    </div>
+    <hr>
+
     <div id="menu-no-country" class="hidden">
       <p class="stat-line">まだ国を興していません。</p>
       <button id="menu-create-country-btn" class="btn btn-fill btn-block">建国する</button>
@@ -416,11 +481,64 @@
       <button id="edit-save-btn" class="btn btn-fill btn-block">変更を保存</button>
       <hr>
       <p class="stat-line">治めている区画: <b id="edit-region-count" class="mono">0</b></p>
+      <div id="edit-region-list" class="region-list"></div>
       <button id="edit-delete-country-btn" class="btn btn-danger btn-block">建国を取り消す(すべての領土を解放)</button>
     </div>
   </div>
 
+  <!-- 国家リスト -->
+  <div id="nation-panel" class="side-menu hidden">
+    <div class="side-menu-header">
+      <h2>国家リスト</h2>
+      <button id="nation-close-btn" class="icon-btn" aria-label="閉じる">×</button>
+    </div>
+    <button id="nation-clear-highlight-btn" class="btn btn-sm hidden" style="margin:8px 0;">強調表示を解除</button>
+    <div id="nation-list"></div>
+    <div id="nation-empty" class="admin-empty">まだ国はありません。</div>
+  </div>
+
+  <!-- 汎用確認モーダル -->
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="panel hud">
+      <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
+      <span class="corner corner-bl"></span><span class="corner corner-br"></span>
+      <p id="confirm-question" style="margin:0; font-size:14.5px; line-height:1.7;"></p>
+      <div class="panel-actions">
+        <button id="confirm-no-btn" class="btn">いいえ</button>
+        <button id="confirm-yes-btn" class="btn btn-fill">はい</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 運営パネル -->
+  <div id="admin-panel" class="hidden">
+    <div class="side-menu-header">
+      <h2>運営パネル</h2>
+      <button id="admin-close-btn" class="icon-btn" aria-label="閉じる">×</button>
+    </div>
+
+    <h3>領土のリセット</h3>
+    <p class="hint">実行しても30日間はゴミ箱から復元できます。</p>
+    <button id="admin-reset-claims-btn" class="btn btn-danger btn-block">領土だけリセット(国は残す)</button>
+    <button id="admin-reset-all-btn" class="btn btn-danger btn-block">国データも含めて全リセット</button>
+
+    <h3>ゴミ箱(30日間保持)</h3>
+    <div id="admin-trash-list"></div>
+    <div id="admin-trash-empty" class="admin-empty">ゴミ箱は空です。</div>
+    <button id="admin-purge-expired-btn" class="btn btn-sm">期限切れをまとめて完全削除</button>
+
+    <h3>国の一覧</h3>
+    <p class="hint">運営の追加はFirebaseコンソールから手動でのみ行えます(セキュリティのため、運営自身が他の運営を追加することはできません)。</p>
+    <div id="admin-country-list"></div>
+    <div id="admin-country-empty" class="admin-empty">まだ国はありません。</div>
+
+    <h3>大陸規模の自動拒否</h3>
+    <p class="hint" id="admin-restricted-info">読み込み中...</p>
+  </div>
+
 </div>
+
+<div id="toast-wrap"></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -456,8 +574,45 @@ let claimsCache = {};
 let pathSelection = null;
 let pendingRegionId = null;
 let mapInitialized = false;
+let isAdmin = false;
+let allCountries = {};
+let takenColors = {};
+let trashCache = {};
+let bannedCache = {};
+let regionNames = {};
+let restrictedRegionIds = new Set();
+let highlightedUid = null;
+const MAX_CLAIMABLE_AREA_KM2 = 4000000; // これを超える区画(大陸規模)は主張禁止
+const EARTH_SURFACE_KM2 = 510072000;
 
 const el = (id) => document.getElementById(id);
+
+function showToast(msg, level){
+  window.__diag(msg, level);
+  const t = document.createElement("div");
+  t.className = "toast" + (level === "error" ? " toast-error" : "");
+  t.textContent = msg;
+  el("toast-wrap").appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => {
+    t.classList.remove("show");
+    setTimeout(() => t.remove(), 250);
+  }, 3400);
+}
+
+function showConfirmModal(message, onYes){
+  el("confirm-question").textContent = message;
+  el("confirm-modal").classList.remove("hidden");
+  const yesBtn = el("confirm-yes-btn");
+  const noBtn = el("confirm-no-btn");
+  const cleanup = () => {
+    yesBtn.onclick = null;
+    noBtn.onclick = null;
+    el("confirm-modal").classList.add("hidden");
+  };
+  yesBtn.onclick = () => { cleanup(); onYes(); };
+  noBtn.onclick = () => cleanup();
+}
 
 // ---------- 認証 ----------
 async function handleTokenFromUrl() {
@@ -478,7 +633,7 @@ async function handleTokenFromUrl() {
       window.__diag("Firebase認証: 成功");
     } catch (e) {
       window.__diag("Firebase認証: 失敗 [" + (e.code || "?") + "] " + e.message, "error");
-      alert("ログインに失敗しました。もう一度お試しください。");
+      showToast("ログインに失敗しました。もう一度お試しください。", "error");
     }
     params.delete("token");
     const newUrl = location.pathname + (params.toString() ? "?" + params.toString() : "");
@@ -563,6 +718,10 @@ onAuthStateChanged(auth, async (user) => {
     initMapOnce();
     watchMyCountry();
     watchClaims();
+    watchColors();
+    watchAdminStatus();
+    watchAllCountries();
+    watchBanned();
   } else {
     el("app").classList.add("hidden");
     el("app").style.display = "none";
@@ -593,6 +752,32 @@ async function initMapOnce() {
   const geo = topojson.feature(topo, topo.objects[objectKey]);
   window.__diag("地図データ読み込み完了: " + geo.features.length + "区画");
 
+  const seenIds = {};
+  const dupNames = new Set();
+  for (const f of geo.features) {
+    const id = regionIdOf(f);
+    if (seenIds[id]) dupNames.add(regionNameOf(f) + "(id=" + id + ")");
+    seenIds[id] = true;
+  }
+  if (dupNames.size > 0) {
+    window.__diag("同じIDを持つ区画が" + dupNames.size + "件あります: " + Array.from(dupNames).join(", ") + " (これらは地図上で別々の場所でも、常に同じ持ち主・同じ色として連動します)", "error");
+  }
+
+  restrictedRegionIds = new Set();
+  for (const f of geo.features) {
+    const id = regionIdOf(f);
+    regionNames[id] = regionNameOf(f);
+    const areaKm2 = d3.geoArea(f) / (4 * Math.PI) * EARTH_SURFACE_KM2;
+    if (areaKm2 > MAX_CLAIMABLE_AREA_KM2) restrictedRegionIds.add(id);
+  }
+  if (restrictedRegionIds.size > 0) {
+    window.__diag("大陸規模のため主張禁止に設定した区画: " + restrictedRegionIds.size + "件");
+  }
+  const adminInfo = el("admin-restricted-info");
+  if (adminInfo) {
+    adminInfo.textContent = MAX_CLAIMABLE_AREA_KM2.toLocaleString() + "km²を超える区画は自動的に主張禁止になります(現在" + restrictedRegionIds.size + "件が対象)。";
+  }
+
   const projection = d3.geoNaturalEarth1().fitSize([width, height], geo);
   const path = d3.geoPath().projection(projection);
   const g = svg.append("g");
@@ -603,6 +788,7 @@ async function initMapOnce() {
     .append("path")
     .attr("d", path)
     .attr("data-region-id", (d) => regionIdOf(d))
+    .classed("is-restricted", (d) => restrictedRegionIds.has(regionIdOf(d)))
     .on("click", (event, d) => onRegionClick(regionIdOf(d), regionNameOf(d)))
     .on("mousemove", (event, d) => showTooltip(event, regionIdOf(d), regionNameOf(d)))
     .on("mouseleave", hideTooltip);
@@ -627,9 +813,13 @@ function showTooltip(event, regionId, name){
   tip.classList.remove("hidden");
   tip.style.left = event.offsetX + 14 + "px";
   tip.style.top = event.offsetY + 14 + "px";
-  tip.innerHTML = claim
-    ? `${escapeHtml(name)}<br><span class="mono">${escapeHtml(claim.name)}</span>`
-    : escapeHtml(name);
+  if (restrictedRegionIds.has(regionId)) {
+    tip.innerHTML = `${escapeHtml(name)}<br><span class="mono">主張禁止(大陸規模)</span>`;
+  } else {
+    tip.innerHTML = claim
+      ? `${escapeHtml(name)}<br><span class="mono">${escapeHtml(claim.name)}</span>`
+      : escapeHtml(name);
+  }
 }
 function hideTooltip(){ el("hover-tooltip").classList.add("hidden"); }
 
@@ -637,13 +827,19 @@ function applyClaimColors(){
   if (!pathSelection) return;
   pathSelection
     .attr("fill", (d) => {
-      const claim = claimsCache[regionIdOf(d)];
+      const id = regionIdOf(d);
+      if (restrictedRegionIds.has(id)) return null;
+      const claim = claimsCache[id];
       return claim ? claim.color : null;
     })
     .classed("is-claimed", (d) => !!claimsCache[regionIdOf(d)])
-    .style("filter", (d) => {
+    .classed("is-highlighted", (d) => {
       const claim = claimsCache[regionIdOf(d)];
-      return claim ? `drop-shadow(0 0 5px ${claim.color}99)` : null;
+      return !!(highlightedUid && claim && claim.ownerUid === highlightedUid);
+    })
+    .classed("is-dimmed", (d) => {
+      const claim = claimsCache[regionIdOf(d)];
+      return !!(highlightedUid && claim && claim.ownerUid !== highlightedUid);
     });
 }
 
@@ -664,8 +860,62 @@ function watchClaims(){
     applyClaimColors();
     renderSideMenu();
     renderLegend();
+    if (isAdmin) renderAdminCountryList();
   }, (error) => {
     window.__diag("claimsの読み取りに失敗: [" + error.code + "] " + error.message + "(Realtime Databaseのルールを確認してください)", "error");
+  });
+}
+
+function watchColors(){
+  onValue(ref(db, "colors"), (snap) => {
+    takenColors = snap.val() || {};
+  }, (error) => {
+    window.__diag("colorsの読み取りに失敗: [" + error.code + "] " + error.message, "error");
+  });
+}
+
+function watchAdminStatus(){
+  onValue(ref(db, `admins/${currentUser.uid}`), (snap) => {
+    isAdmin = snap.val() === true;
+    el("admin-open-btn").classList.toggle("hidden", !isAdmin);
+    if (isAdmin) watchTrash();
+  }, (error) => {
+    // 権限エラーは想定内(admins自体は誰でも読めるルールだが念のため)
+    window.__diag("admins読み取りに失敗: [" + error.code + "] " + error.message, "error");
+  });
+}
+
+function watchBanned(){
+  onValue(ref(db, "banned"), (snap) => {
+    bannedCache = snap.val() || {};
+    renderAdminCountryList();
+  }, (error) => {
+    window.__diag("banned読み取りに失敗: [" + error.code + "] " + error.message, "error");
+  });
+}
+
+let allCountriesWatching = false;
+function watchAllCountries(){
+  if (allCountriesWatching) return;
+  allCountriesWatching = true;
+  onValue(ref(db, "countries"), (snap) => {
+    allCountries = snap.val() || {};
+    renderAdminCountryList();
+    renderNationList();
+  }, (error) => {
+    window.__diag("countries一覧の読み取りに失敗: [" + error.code + "] " + error.message, "error");
+  });
+}
+
+let trashWatching = false;
+function watchTrash(){
+  if (trashWatching) return;
+  trashWatching = true;
+  onValue(ref(db, "trash"), (snap) => {
+    trashCache = snap.val() || {};
+    renderAdminTrashList();
+  }, (error) => {
+    window.__diag("trash読み取りに失敗: [" + error.code + "] " + error.message + "(運営権限が付与されているか確認してください)", "error");
   });
 }
 
@@ -701,8 +951,266 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
 }
 
+// ---------- 国家リスト ----------
+el("nation-open-btn").addEventListener("click", () => {
+  renderNationList();
+  el("nation-panel").classList.remove("hidden");
+});
+el("nation-close-btn").addEventListener("click", () => el("nation-panel").classList.add("hidden"));
+el("nation-clear-highlight-btn").addEventListener("click", () => {
+  highlightedUid = null;
+  applyClaimColors();
+  renderNationList();
+});
+
+function toggleHighlight(uid){
+  highlightedUid = (highlightedUid === uid) ? null : uid;
+  applyClaimColors();
+  renderNationList();
+}
+
+function renderNationList(){
+  const list = el("nation-list");
+  if (!list) return;
+  const entries = Object.entries(allCountries);
+  list.innerHTML = "";
+  el("nation-empty").classList.toggle("hidden", entries.length > 0);
+  el("nation-clear-highlight-btn").classList.toggle("hidden", !highlightedUid);
+  for (const [uid, country] of entries) {
+    const count = Object.values(claimsCache).filter((c) => c.ownerUid === uid).length;
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.style.cursor = "pointer";
+    if (uid === highlightedUid) row.style.background = "rgba(79,227,208,0.12)";
+    row.innerHTML = `<span class="legend-swatch" style="background:${country.color}"></span>
+                      <span class="legend-name" style="color:var(--text)">${escapeHtml(country.name)}</span>
+                      <span class="legend-count mono">${count}</span>`;
+    row.addEventListener("click", () => toggleHighlight(uid));
+    list.appendChild(row);
+  }
+}
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+el("admin-open-btn").addEventListener("click", () => {
+  renderAdminTrashList();
+  renderAdminCountryList();
+  el("admin-panel").classList.remove("hidden");
+});
+el("admin-close-btn").addEventListener("click", () => el("admin-panel").classList.add("hidden"));
+
+function renderAdminTrashList(){
+  const list = el("admin-trash-list");
+  const entries = Object.entries(trashCache).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+  list.innerHTML = "";
+  el("admin-trash-empty").classList.toggle("hidden", entries.length > 0);
+  for (const [trashId, entry] of entries) {
+    const remainMs = (entry.expiresAt || 0) - Date.now();
+    const remainDays = Math.max(0, Math.ceil(remainMs / 86400000));
+    const row = document.createElement("div");
+    row.className = "admin-row";
+    row.innerHTML = `<span class="grow">${escapeHtml(entry.label || "リセット")}<br><span class="meta">残り${remainDays}日で完全削除可能</span></span>`;
+    const restoreBtn = document.createElement("button");
+    restoreBtn.className = "btn btn-sm";
+    restoreBtn.textContent = "復元";
+    restoreBtn.onclick = () => adminRestoreTrash(trashId);
+    row.appendChild(restoreBtn);
+    list.appendChild(row);
+  }
+}
+
+function renderAdminCountryList(){
+  const list = el("admin-country-list");
+  if (!list) return;
+  const entries = Object.entries(allCountries);
+  list.innerHTML = "";
+  el("admin-country-empty").classList.toggle("hidden", entries.length > 0);
+  for (const [uid, country] of entries) {
+    const count = Object.values(claimsCache).filter((c) => c.ownerUid === uid).length;
+    const isBanned = !!bannedCache[uid];
+    const isAdminUser = false; // admins一覧は別ノードなので個別チェックが必要な場合はここに追加
+    const row = document.createElement("div");
+    row.className = "admin-row";
+    row.innerHTML = `<span class="swatch" style="background:${country.color}"></span>
+      <span class="grow">${escapeHtml(country.name)}${isBanned ? " (禁止中)" : ""}<br><span class="meta">${escapeHtml(country.discordName || "")} ・ ${count}区画</span></span>`;
+
+    const btnGroup = document.createElement("div");
+    btnGroup.className = "btn-group";
+
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "btn btn-sm";
+    clearBtn.textContent = "領土削除";
+    clearBtn.onclick = () => {
+      showConfirmModal(`「${country.name}」の領土(${count}区画)だけを削除します(国は残ります)。よろしいですか?`, () => adminClearCountryClaims(uid, country));
+    };
+    btnGroup.appendChild(clearBtn);
+
+    const banBtn = document.createElement("button");
+    banBtn.className = "btn btn-sm" + (isBanned ? "" : " btn-danger");
+    banBtn.textContent = isBanned ? "禁止解除" : "禁止";
+    banBtn.onclick = () => {
+      const msg = isBanned ? `「${country.name}」の主張禁止を解除しますか?` : `「${country.name}」を主張禁止にしますか?(建国・新規主張ができなくなります)`;
+      showConfirmModal(msg, () => adminToggleBan(uid, !isBanned));
+    };
+    btnGroup.appendChild(banBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn btn-sm btn-danger";
+    delBtn.textContent = "国削除";
+    delBtn.onclick = () => {
+      showConfirmModal(`「${country.name}」を国ごと削除しますか?(30日間はゴミ箱から復元できます)`, () => adminForceDeleteCountry(uid));
+    };
+    btnGroup.appendChild(delBtn);
+
+    row.appendChild(btnGroup);
+    list.appendChild(row);
+  }
+}
+
+async function adminClearCountryClaims(uid, country){
+  const owned = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === uid);
+  if (owned.length === 0) { showToast("この国はまだ領土を持っていません。"); return; }
+  const trashId = String(Date.now());
+  const now = Date.now();
+  const payload = {
+    createdAt: now,
+    expiresAt: now + TRASH_RETENTION_MS,
+    createdBy: currentUser.uid,
+    label: `「${country.name}」の領土を運営が削除`,
+    claims: Object.fromEntries(owned)
+  };
+  const updates = { [`trash/${trashId}`]: payload };
+  for (const [regionId] of owned) updates[`claims/${regionId}`] = null;
+  try {
+    await update(ref(db), updates);
+    showToast(`「${country.name}」の領土を削除しました`);
+  } catch (e) {
+    showToast("削除に失敗しました: " + e.message, "error");
+  }
+}
+
+async function adminToggleBan(uid, banned){
+  try {
+    await set(ref(db, `banned/${uid}`), banned ? true : null);
+    showToast(banned ? "主張を禁止にしました" : "禁止を解除しました");
+  } catch (e) {
+    showToast("操作に失敗しました: " + e.message, "error");
+  }
+}
+
+async function releaseColor(uid, color){
+  if (!color) return;
+  const hex = color.toLowerCase();
+  if (takenColors[hex] === uid || isAdmin) {
+    try { await set(ref(db, `colors/${hex}`), null); } catch (e) { /* 既に無い場合等は無視 */ }
+  }
+}
+
+async function adminResetToTrash(includeCountries){
+  const trashId = String(Date.now());
+  const now = Date.now();
+  const payload = {
+    createdAt: now,
+    expiresAt: now + TRASH_RETENTION_MS,
+    createdBy: currentUser.uid,
+    label: includeCountries ? "全リセット(国データ含む)" : "領土のみリセット",
+    claims: claimsCache
+  };
+  const updates = { [`trash/${trashId}`]: payload };
+  for (const regionId of Object.keys(claimsCache)) updates[`claims/${regionId}`] = null;
+  if (includeCountries) {
+    payload.countries = allCountries;
+    for (const [uid, country] of Object.entries(allCountries)) {
+      updates[`countries/${uid}`] = null;
+      if (country.color) updates[`colors/${country.color.toLowerCase()}`] = null;
+    }
+  }
+  try {
+    await update(ref(db), updates);
+    showToast("リセットしました(30日間はゴミ箱から復元できます)");
+  } catch (e) {
+    showToast("リセットに失敗しました: " + e.message, "error");
+  }
+}
+el("admin-reset-claims-btn").addEventListener("click", () => {
+  showConfirmModal("領土をすべてリセットします(国データは残ります)。よろしいですか?", () => adminResetToTrash(false));
+});
+el("admin-reset-all-btn").addEventListener("click", () => {
+  showConfirmModal("国データも含めてすべてリセットします。よろしいですか?", () => adminResetToTrash(true));
+});
+
+async function adminRestoreTrash(trashId){
+  const entry = trashCache[trashId];
+  if (!entry) return;
+  const updates = {};
+  for (const [regionId, claim] of Object.entries(entry.claims || {})) {
+    updates[`claims/${regionId}`] = claim;
+  }
+  if (entry.countries) {
+    for (const [uid, country] of Object.entries(entry.countries)) {
+      updates[`countries/${uid}`] = country;
+      if (country.color) updates[`colors/${country.color.toLowerCase()}`] = uid;
+    }
+  }
+  updates[`trash/${trashId}`] = null;
+  try {
+    await update(ref(db), updates);
+    showToast("復元しました");
+  } catch (e) {
+    showToast("復元に失敗しました: " + e.message, "error");
+  }
+}
+
+el("admin-purge-expired-btn").addEventListener("click", () => {
+  const now = Date.now();
+  const expired = Object.entries(trashCache).filter(([, e]) => (e.expiresAt || 0) < now);
+  if (expired.length === 0) { showToast("期限切れのゴミ箱はありません。"); return; }
+  showConfirmModal(`期限切れの${expired.length}件を完全に削除します。元に戻せません。よろしいですか?`, async () => {
+    const updates = {};
+    for (const [trashId] of expired) updates[`trash/${trashId}`] = null;
+    try {
+      await update(ref(db), updates);
+      showToast("完全削除しました");
+    } catch (e) {
+      showToast("削除に失敗しました: " + e.message, "error");
+    }
+  });
+});
+
+async function adminForceDeleteCountry(uid){
+  const country = allCountries[uid];
+  if (!country) return;
+  const ownedClaims = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === uid);
+  const trashId = String(Date.now());
+  const now = Date.now();
+  const payload = {
+    createdAt: now,
+    expiresAt: now + TRASH_RETENTION_MS,
+    createdBy: currentUser.uid,
+    label: `「${country.name}」を運営が削除`,
+    countries: { [uid]: country },
+    claims: Object.fromEntries(ownedClaims)
+  };
+  const updates = { [`trash/${trashId}`]: payload, [`countries/${uid}`]: null };
+  if (country.color) updates[`colors/${country.color.toLowerCase()}`] = null;
+  for (const [regionId] of ownedClaims) updates[`claims/${regionId}`] = null;
+  try {
+    await update(ref(db), updates);
+    showToast(`「${country.name}」を削除しました`);
+  } catch (e) {
+    showToast("削除に失敗しました: " + e.message, "error");
+  }
+}
+
 // ---------- クリック時の主張ロジック ----------
 function onRegionClick(regionId, regionName){
+  if (restrictedRegionIds.has(regionId)) {
+    showToast("この区画は大陸規模のため主張できません。", "error");
+    return;
+  }
+  if (bannedCache[currentUser.uid]) {
+    showToast("運営により主張が禁止されています。", "error");
+    return;
+  }
   if (!myCountry) { openClaimModal(); return; }
   const existing = claimsCache[regionId];
   if (existing && existing.ownerUid !== currentUser.uid) {
@@ -719,12 +1227,16 @@ function onRegionClick(regionId, regionName){
 }
 
 async function claimRegion(regionId){
-  await set(ref(db, `claims/${regionId}`), {
-    ownerUid: currentUser.uid,
-    name: myCountry.name,
-    color: myCountry.color,
-    updatedAt: serverTimestamp()
-  });
+  try {
+    await set(ref(db, `claims/${regionId}`), {
+      ownerUid: currentUser.uid,
+      name: myCountry.name,
+      color: myCountry.color,
+      updatedAt: serverTimestamp()
+    });
+  } catch (e) {
+    showToast("主張に失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
+  }
 }
 
 el("overwrite-yes-btn").addEventListener("click", () => {
@@ -742,7 +1254,7 @@ el("skip-no-btn").addEventListener("click", () => localStorage.setItem(SKIP_KEY,
 // ---------- 建国モーダル ----------
 function openClaimModal(){
   el("claim-country-name").value = "";
-  const c = randomHex();
+  const c = randomAvailableHex();
   el("claim-color-picker").value = c;
   el("claim-color-hex").value = c;
   el("claim-modal").classList.remove("hidden");
@@ -758,80 +1270,163 @@ el("claim-color-hex").addEventListener("input", (e) => {
   if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) el("claim-color-picker").value = e.target.value;
 });
 el("claim-random-color-btn").addEventListener("click", () => {
-  const c = randomHex();
+  const c = randomAvailableHex();
   el("claim-color-picker").value = c;
   el("claim-color-hex").value = c;
 });
 el("claim-save-btn").addEventListener("click", async () => {
+  if (bannedCache[currentUser.uid]) { showToast("運営により主張が禁止されています。", "error"); el("claim-modal").classList.add("hidden"); return; }
   const name = el("claim-country-name").value.trim();
   const color = el("claim-color-hex").value.trim();
-  if (!name) { alert("国名を入力してください。"); return; }
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) { alert("色はカラーコード(#rrggbb)で指定してください。"); return; }
+  if (!name) { showToast("国名を入力してください。", "error"); return; }
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) { showToast("色はカラーコード(#rrggbb)で指定してください。", "error"); return; }
 
   const existing = await get(ref(db, `countries/${currentUser.uid}`));
-  if (existing.exists()) { alert("すでに建国済みです。"); el("claim-modal").classList.add("hidden"); return; }
+  if (existing.exists()) { showToast("すでに建国済みです。", "error"); el("claim-modal").classList.add("hidden"); return; }
 
-  await set(ref(db, `countries/${currentUser.uid}`), {
-    name, color,
-    discordId: myDiscordClaims.discordId,
-    discordName: myDiscordClaims.discordName,
-    createdAt: serverTimestamp()
-  });
-  el("claim-modal").classList.add("hidden");
+  const hex = color.toLowerCase();
+  try {
+    await set(ref(db, `colors/${hex}`), currentUser.uid);
+  } catch (e) {
+    showToast("その色はすでに他の国が使っています。別の色を選んでください。", "error");
+    return;
+  }
+
+  try {
+    await set(ref(db, `countries/${currentUser.uid}`), {
+      name, color: hex,
+      discordId: myDiscordClaims.discordId,
+      discordName: myDiscordClaims.discordName,
+      createdAt: serverTimestamp()
+    });
+    el("claim-modal").classList.add("hidden");
+    showToast(`「${name}」を建国しました`);
+  } catch (e) {
+    await releaseColor(currentUser.uid, hex);
+    showToast("建国に失敗しました: " + e.message, "error");
+  }
 });
-function randomHex(){ return "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0"); }
+function randomAvailableHex(){
+  for (let i = 0; i < 50; i++) {
+    const c = "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+    if (!takenColors[c.toLowerCase()]) return c;
+  }
+  return "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+}
 
 // ---------- 自国の管理(サイドメニュー) ----------
 el("menu-btn").addEventListener("click", () => { renderSideMenu(); el("side-menu").classList.remove("hidden"); });
 el("menu-close-btn").addEventListener("click", () => el("side-menu").classList.add("hidden"));
 el("menu-create-country-btn").addEventListener("click", () => { el("side-menu").classList.add("hidden"); openClaimModal(); });
 
+// ---------- 表示モード(ライト/ダーク) ----------
+function applyTheme(theme){
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("menearth_theme", theme);
+  }
+  el("theme-dark-btn").classList.toggle("active", theme !== "light");
+  el("theme-light-btn").classList.toggle("active", theme === "light");
+}
+el("theme-dark-btn").addEventListener("click", () => applyTheme("dark"));
+el("theme-light-btn").addEventListener("click", () => applyTheme("light"));
+
 function renderSideMenu(){
   const has = !!myCountry;
+  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
   el("menu-no-country").classList.toggle("hidden", has);
   el("menu-has-country").classList.toggle("hidden", !has);
   if (!has) return;
   el("edit-country-name").value = myCountry.name;
   el("edit-color-picker").value = myCountry.color;
   el("edit-color-hex").value = myCountry.color;
-  const count = Object.values(claimsCache).filter(c => c.ownerUid === currentUser.uid).length;
-  el("edit-region-count").textContent = count;
+  const owned = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === currentUser.uid);
+  el("edit-region-count").textContent = owned.length;
+
+  const list = el("edit-region-list");
+  list.innerHTML = "";
+  for (const [regionId] of owned) {
+    const row = document.createElement("div");
+    row.className = "region-row";
+    row.innerHTML = `<span>${escapeHtml(regionNames[regionId] || regionId)}</span>`;
+    const releaseBtn = document.createElement("button");
+    releaseBtn.className = "btn btn-sm btn-danger";
+    releaseBtn.textContent = "解放";
+    releaseBtn.onclick = () => releaseOwnRegion(regionId);
+    row.appendChild(releaseBtn);
+    list.appendChild(row);
+  }
+}
+
+async function releaseOwnRegion(regionId){
+  try {
+    await set(ref(db, `claims/${regionId}`), null);
+    showToast((regionNames[regionId] || regionId) + "の主張を解放しました。");
+  } catch (e) {
+    showToast("解放に失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
+  }
 }
 el("edit-color-picker").addEventListener("input", (e) => el("edit-color-hex").value = e.target.value);
 el("edit-color-hex").addEventListener("input", (e) => {
   if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) el("edit-color-picker").value = e.target.value;
 });
 el("edit-random-color-btn").addEventListener("click", () => {
-  const c = randomHex();
+  const c = randomAvailableHex();
   el("edit-color-picker").value = c;
   el("edit-color-hex").value = c;
 });
 el("edit-save-btn").addEventListener("click", async () => {
   const name = el("edit-country-name").value.trim();
   const color = el("edit-color-hex").value.trim();
-  if (!name) { alert("国名を入力してください。"); return; }
-  if (!/^#[0-9a-fA-F]{6}$/.test(color)) { alert("色はカラーコードで指定してください。"); return; }
+  if (!name) { showToast("国名を入力してください。", "error"); return; }
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) { showToast("色はカラーコードで指定してください。", "error"); return; }
+
+  const newHex = color.toLowerCase();
+  const oldHex = (myCountry.color || "").toLowerCase();
+  const colorChanged = newHex !== oldHex;
+
+  if (colorChanged) {
+    try {
+      await set(ref(db, `colors/${newHex}`), currentUser.uid);
+    } catch (e) {
+      showToast("その色はすでに他の国が使っています。別の色を選んでください。", "error");
+      return;
+    }
+  }
 
   const updates = {};
   updates[`countries/${currentUser.uid}/name`] = name;
-  updates[`countries/${currentUser.uid}/color`] = color;
+  updates[`countries/${currentUser.uid}/color`] = newHex;
   for (const [regionId, claim] of Object.entries(claimsCache)) {
     if (claim.ownerUid === currentUser.uid) {
       updates[`claims/${regionId}/name`] = name;
-      updates[`claims/${regionId}/color`] = color;
+      updates[`claims/${regionId}/color`] = newHex;
     }
   }
-  await update(ref(db), updates);
-  alert("保存しました。");
-});
-el("edit-delete-country-btn").addEventListener("click", async () => {
-  if (!confirm("建国を取り消し、すべての領土を解放します。よろしいですか?")) return;
-  const updates = { [`countries/${currentUser.uid}`]: null };
-  for (const [regionId, claim] of Object.entries(claimsCache)) {
-    if (claim.ownerUid === currentUser.uid) updates[`claims/${regionId}`] = null;
+  try {
+    await update(ref(db), updates);
+    if (colorChanged) await releaseColor(currentUser.uid, oldHex);
+    showToast("保存しました。");
+  } catch (e) {
+    if (colorChanged) await releaseColor(currentUser.uid, newHex);
+    showToast("保存に失敗しました: " + e.message, "error");
   }
-  await update(ref(db), updates);
-  el("side-menu").classList.add("hidden");
+});
+el("edit-delete-country-btn").addEventListener("click", () => {
+  showConfirmModal("建国を取り消し、すべての領土を解放します。よろしいですか?", async () => {
+    const updates = { [`countries/${currentUser.uid}`]: null };
+    for (const [regionId, claim] of Object.entries(claimsCache)) {
+      if (claim.ownerUid === currentUser.uid) updates[`claims/${regionId}`] = null;
+    }
+    try {
+      await update(ref(db), updates);
+      await releaseColor(currentUser.uid, myCountry ? myCountry.color : null);
+      el("side-menu").classList.add("hidden");
+      showToast("建国を取り消しました。");
+    } catch (e) {
+      showToast("取り消しに失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
+    }
+  });
 });
 
 // ---------- 起動 ----------
