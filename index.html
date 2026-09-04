@@ -411,8 +411,8 @@
     <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
     <span class="corner corner-bl"></span><span class="corner corner-br"></span>
     <div class="badge">麺</div>
-    <h1>現在メンテナンス中です</h1>
-    <p>運営のみアクセスできる状態になっています。しばらくしてから再度お試しください。</p>
+    <h1>ただいまメンテナンス中です</h1>
+    <p>現在アクセスを一時的に制限しています。しばらくしてから再度お試しください。</p>
   </div>
 </div>
 
@@ -646,7 +646,7 @@ let myCountry = null;
 let myDiscordClaims = {};
 let claimsCache = {};
 let pathSelection = null;
-let pendingRegionId = null;
+let pathIndex = new Map(); // regionId -> path DOMノード(差分更新用)
 let mapInitialized = false;
 let isAdmin = false;
 let adminOnlyMode = false;
@@ -889,6 +889,9 @@ async function initMapOnce() {
     .attr("data-region-id", (d) => regionIdOf(d))
     .classed("is-restricted", (d) => restrictedRegionIds.has(regionIdOf(d)));
 
+  pathIndex = new Map();
+  pathSelection.each(function(d){ pathIndex.set(regionIdOf(d), this); });
+
   // 区画数が多いため、1つずつにイベントを付けず地図全体に1つだけ委譲して負荷を下げる
   let lastTooltipMove = 0;
   svg
@@ -954,32 +957,36 @@ function showTooltip(event, regionId, name){
 }
 function hideTooltip(){ el("hover-tooltip").classList.add("hidden"); }
 
-function applyClaimColors(){
+function applyClaimColors(ids){
   if (!pathSelection) return;
-  pathSelection
-    .style("fill", (d) => {
-      const id = regionIdOf(d);
-      if (restrictedRegionIds.has(id)) return null;
-      const claim = claimsCache[id];
-      return claim ? claim.color : null;
-    })
-    .style("stroke", (d) => {
-      const id = regionIdOf(d);
-      if (restrictedRegionIds.has(id)) return null;
-      const claim = claimsCache[id];
-      if (!claim) return null;
+  const targetIds = ids || pathIndex.keys();
+  for (const id of targetIds) {
+    const node = pathIndex.get(id);
+    if (!node) continue;
+    const claim = restrictedRegionIds.has(id) ? null : claimsCache[id];
+    const sel = d3.select(node);
+    sel.style("fill", claim ? claim.color : null);
+    if (claim) {
       const c = d3.color(claim.color);
-      return c ? c.darker(0.6) : claim.color;
-    })
-    .classed("is-claimed", (d) => !!claimsCache[regionIdOf(d)])
-    .classed("is-highlighted", (d) => {
-      const claim = claimsCache[regionIdOf(d)];
-      return !!(highlightedUid && claim && claim.ownerUid === highlightedUid);
-    })
-    .classed("is-dimmed", (d) => {
-      const claim = claimsCache[regionIdOf(d)];
-      return !!(highlightedUid && claim && claim.ownerUid !== highlightedUid);
-    });
+      sel.style("stroke", c ? c.darker(0.6) : claim.color);
+    } else {
+      sel.style("stroke", null);
+    }
+    sel.classed("is-claimed", !!claim);
+    sel.classed("is-highlighted", !!(highlightedUid && claim && claim.ownerUid === highlightedUid));
+    sel.classed("is-dimmed", !!(highlightedUid && claim && claim.ownerUid !== highlightedUid));
+  }
+}
+
+function diffClaimIds(oldClaims, newClaims){
+  const ids = new Set([...Object.keys(oldClaims), ...Object.keys(newClaims)]);
+  const changed = [];
+  for (const id of ids) {
+    const a = oldClaims[id], b = newClaims[id];
+    if (!a && !b) continue;
+    if (!a || !b || a.color !== b.color || a.ownerUid !== b.ownerUid) changed.push(id);
+  }
+  return changed;
 }
 
 // ---------- Firebase購読 ----------
@@ -995,8 +1002,10 @@ function watchMyCountry(){
 }
 function watchClaims(){
   onValue(ref(db, "claims"), (snap) => {
-    claimsCache = snap.val() || {};
-    applyClaimColors();
+    const newClaims = snap.val() || {};
+    const changedIds = diffClaimIds(claimsCache, newClaims);
+    claimsCache = newClaims;
+    applyClaimColors(changedIds);
     renderSideMenu();
     renderLegend();
     if (isAdmin) renderAdminCountryList();
@@ -1017,7 +1026,8 @@ function watchAdminStatus(){
   onValue(ref(db, `admins/${currentUser.uid}`), (snap) => {
     isAdmin = snap.val() === true || isSupremeAdmin;
     el("admin-open-btn").classList.toggle("hidden", !isAdmin);
-    if (isAdmin) { watchTrash(); window.__showDiagForAdmin(); }
+    if (isAdmin) watchTrash();
+    if (isSupremeAdmin) window.__showDiagForAdmin();
     applyMaintenanceGate();
   }, (error) => {
     // 権限エラーは想定内(admins自体は誰でも読めるルールだが念のため)
@@ -1513,6 +1523,8 @@ el("country-mode-btn").addEventListener("click", () => {
   showToast(countryClaimMode ? "国単位で主張モード: ON(クリックした国全体を一括で主張します)" : "国単位で主張モード: OFF");
 });
 
+const COUNTRY_CLAIM_SKIP_KEY = "menearth_skip_country_claim_confirm";
+
 async function claimCountryGroup(regionId){
   const key = regionCountryKey[regionId];
   if (!key) { showToast("この区画は国データが無いため一括主張できません。個別にクリックしてください。", "error"); return; }
@@ -1532,7 +1544,7 @@ async function claimCountryGroup(regionId){
   if (otherLines) msg += ` うち ${otherLines} は他国の領土です。`;
   msg += " よろしいですか?";
 
-  showConfirmModal(msg, async () => {
+  showSkippableConfirm(msg, COUNTRY_CLAIM_SKIP_KEY, async () => {
     const updates = {};
     for (const id of groupIds) {
       updates[`claims/${id}`] = { ownerUid: currentUser.uid, name: myCountry.name, color: myCountry.color, updatedAt: serverTimestamp() };
@@ -1565,13 +1577,11 @@ function onRegionClick(regionId, regionName){
 
   const existing = claimsCache[regionId];
   if (existing && existing.ownerUid !== currentUser.uid) {
-    if (localStorage.getItem(SKIP_KEY) === "1") {
-      claimRegion(regionId);
-    } else {
-      pendingRegionId = regionId;
-      el("overwrite-question").textContent = `ここを触ると「${existing.name}」も同じ範囲になりますがいいですか?`;
-      el("overwrite-modal").classList.remove("hidden");
-    }
+    showSkippableConfirm(
+      `ここを触ると「${existing.name}」も同じ範囲になりますがいいですか?`,
+      SKIP_KEY,
+      () => claimRegion(regionId)
+    );
     return;
   }
   claimRegion(regionId);
@@ -1590,17 +1600,32 @@ async function claimRegion(regionId){
   }
 }
 
-el("overwrite-yes-btn").addEventListener("click", () => {
-  el("overwrite-modal").classList.add("hidden");
-  if (pendingRegionId) claimRegion(pendingRegionId);
-  pendingRegionId = null;
-});
-el("overwrite-no-btn").addEventListener("click", () => {
-  el("overwrite-modal").classList.add("hidden");
-  pendingRegionId = null;
-});
-el("skip-yes-btn").addEventListener("click", () => localStorage.setItem(SKIP_KEY, "1"));
-el("skip-no-btn").addEventListener("click", () => localStorage.setItem(SKIP_KEY, "0"));
+// ---------- スキップ可能な確認モーダル(「今後表示しない」付き) ----------
+function showSkippableConfirm(message, skipKey, onYes){
+  if (localStorage.getItem(skipKey) === "1") {
+    onYes();
+    return;
+  }
+  el("overwrite-question").textContent = message;
+  el("overwrite-modal").classList.remove("hidden");
+
+  const yesBtn = el("overwrite-yes-btn");
+  const noBtn = el("overwrite-no-btn");
+  const skipYesBtn = el("skip-yes-btn");
+  const skipNoBtn = el("skip-no-btn");
+
+  const cleanup = () => {
+    yesBtn.onclick = null;
+    noBtn.onclick = null;
+    skipYesBtn.onclick = null;
+    skipNoBtn.onclick = null;
+    el("overwrite-modal").classList.add("hidden");
+  };
+  yesBtn.onclick = () => { cleanup(); onYes(); };
+  noBtn.onclick = () => cleanup();
+  skipYesBtn.onclick = () => localStorage.setItem(skipKey, "1");
+  skipNoBtn.onclick = () => localStorage.setItem(skipKey, "0");
+}
 
 // ---------- 建国モーダル ----------
 function openClaimModal(){
@@ -1723,18 +1748,44 @@ function renderSideMenu(){
   const owned = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === currentUser.uid);
   el("edit-region-count").textContent = owned.length;
 
+  // 地図データ上の国(admin属性)ごとにグループ化
+  const groups = new Map(); // countryKey(またはnull) -> [regionId, ...]
+  for (const [regionId] of owned) {
+    const key = regionCountryKey[regionId] || null;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(regionId);
+  }
+
   const list = el("edit-region-list");
   list.innerHTML = "";
-  for (const [regionId] of owned) {
-    const row = document.createElement("div");
-    row.className = "region-row";
-    row.innerHTML = `<span>${escapeHtml(regionNames[regionId] || regionId)}</span>`;
-    const releaseBtn = document.createElement("button");
-    releaseBtn.className = "btn btn-sm btn-danger";
-    releaseBtn.textContent = "解放";
-    releaseBtn.onclick = () => releaseOwnRegion(regionId);
-    row.appendChild(releaseBtn);
-    list.appendChild(row);
+  for (const [key, regionIds] of groups) {
+    const groupLabel = key ? (countryDisplayNames[key] || key) : "その他";
+    if (key && regionIds.length > 1) {
+      const header = document.createElement("div");
+      header.className = "region-row";
+      header.style.fontWeight = "500";
+      header.innerHTML = `<span>${escapeHtml(groupLabel)}(${regionIds.length}区画)</span>`;
+      const releaseGroupBtn = document.createElement("button");
+      releaseGroupBtn.className = "btn btn-sm btn-danger";
+      releaseGroupBtn.textContent = "国ごと解放";
+      releaseGroupBtn.onclick = () => {
+        showConfirmModal(`「${groupLabel}」の${regionIds.length}区画をまとめて解放しますか?`, () => releaseOwnRegions(regionIds, groupLabel));
+      };
+      header.appendChild(releaseGroupBtn);
+      list.appendChild(header);
+    }
+    for (const regionId of regionIds) {
+      const row = document.createElement("div");
+      row.className = "region-row";
+      row.style.paddingLeft = key && regionIds.length > 1 ? "12px" : "0";
+      row.innerHTML = `<span>${escapeHtml(regionNames[regionId] || regionId)}</span>`;
+      const releaseBtn = document.createElement("button");
+      releaseBtn.className = "btn btn-sm btn-danger";
+      releaseBtn.textContent = "解放";
+      releaseBtn.onclick = () => releaseOwnRegion(regionId);
+      row.appendChild(releaseBtn);
+      list.appendChild(row);
+    }
   }
 }
 
@@ -1742,6 +1793,17 @@ async function releaseOwnRegion(regionId){
   try {
     await set(ref(db, `claims/${regionId}`), null);
     showToast((regionNames[regionId] || regionId) + "の主張を解放しました。");
+  } catch (e) {
+    showToast("解放に失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
+  }
+}
+
+async function releaseOwnRegions(regionIds, label){
+  const updates = {};
+  for (const id of regionIds) updates[`claims/${id}`] = null;
+  try {
+    await update(ref(db), updates);
+    showToast(`「${label}」の${regionIds.length}区画を解放しました。`);
   } catch (e) {
     showToast("解放に失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
   }
