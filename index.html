@@ -49,7 +49,10 @@
     color: var(--text);
     font-family: "Noto Sans JP", sans-serif;
     overflow:hidden;
+    -webkit-user-select:none; -moz-user-select:none; user-select:none;
+    -webkit-touch-callout:none;
   }
+  input, textarea{ -webkit-user-select:text; -moz-user-select:text; user-select:text; }
   h1,h2,.display{ font-family:"Space Grotesk","Noto Sans JP",sans-serif; font-weight:700; letter-spacing:.01em; }
   .mono{ font-family:"JetBrains Mono", monospace; }
   button, input{ font-family:inherit; }
@@ -135,6 +138,7 @@
     font-size:19px; cursor:pointer; padding:5px 11px; line-height:1;
   }
   .icon-btn:hover{ border-color: var(--border); color:var(--cyan); }
+  .icon-btn.active{ color:var(--cyan); border-color:var(--cyan-dim); background:rgba(79,227,208,0.12); }
 
   #map-wrap{ position:relative; flex:1; overflow:hidden; background: var(--map-ocean); }
   #map-svg{ width:100%; height:100%; cursor:grab; display:block; shape-rendering: optimizeSpeed; }
@@ -381,6 +385,7 @@
     <div id="top-bar-right">
       <button id="admin-open-btn" class="icon-btn hidden" title="運営パネル" aria-label="運営パネル">⚙</button>
       <button id="nation-open-btn" class="icon-btn" title="国家リスト" aria-label="国家リスト">🏳</button>
+      <button id="country-mode-btn" class="icon-btn" title="国単位で主張" aria-label="国単位で主張">🌐</button>
       <button id="found-nation-btn" class="btn btn-fill hidden">建国する</button>
       <button id="menu-btn" class="icon-btn" title="自国の管理" aria-label="自国の管理">☰</button>
     </div>
@@ -582,8 +587,16 @@ let bannedCache = {};
 let regionNames = {};
 let restrictedRegionIds = new Set();
 let highlightedUid = null;
+let countryClaimMode = false;
+let countryGroups = {};      // countryKey -> [regionId, ...]
+let regionCountryKey = {};   // regionId -> countryKey
+let countryDisplayNames = {}; // countryKey -> 表示名
 const MAX_CLAIMABLE_AREA_KM2 = 4000000; // これを超える区画(大陸規模)は主張禁止
 const EARTH_SURFACE_KM2 = 510072000;
+
+function colorKey(hex){
+  return hex.toLowerCase().replace(/^#/, "");
+}
 
 const el = (id) => document.getElementById(id);
 
@@ -769,9 +782,19 @@ async function initMapOnce() {
     regionNames[id] = regionNameOf(f);
     const areaKm2 = d3.geoArea(f) / (4 * Math.PI) * EARTH_SURFACE_KM2;
     if (areaKm2 > MAX_CLAIMABLE_AREA_KM2) restrictedRegionIds.add(id);
+
+    const key = countryKeyOf(f);
+    if (key) {
+      regionCountryKey[id] = key;
+      (countryGroups[key] = countryGroups[key] || []).push(id);
+      if (!countryDisplayNames[key]) countryDisplayNames[key] = countryNameOf(f);
+    }
   }
   if (restrictedRegionIds.size > 0) {
     window.__diag("大陸規模のため主張禁止に設定した区画: " + restrictedRegionIds.size + "件");
+  }
+  if (Object.keys(countryGroups).length === 0) {
+    window.__diag("地図データに国を示す属性(admin/sovereignt等)が見つからないため、国単位主張は使えません。", "error");
   }
   const adminInfo = el("admin-restricted-info");
   if (adminInfo) {
@@ -797,7 +820,7 @@ async function initMapOnce() {
     d3.zoom().scaleExtent([1, 8]).on("zoom", (event) => {
       g.attr("transform", event.transform);
     })
-  );
+  ).on("dblclick.zoom", null); // 連打(ダブルクリック/ダブルタップ)によるズームを無効化
 
   applyClaimColors();
 }
@@ -806,6 +829,14 @@ function regionIdOf(f){
   return String(f.id ?? f.properties.id ?? f.properties.iso_3166_2 ?? f.properties.name);
 }
 function regionNameOf(f){ return f.properties.name || regionIdOf(f); }
+function countryKeyOf(f){
+  const p = f.properties || {};
+  return p.admin || p.sovereignt || p.adm0_a3 || p.iso_a2 || null;
+}
+function countryNameOf(f){
+  const p = f.properties || {};
+  return p.admin || p.sovereignt || countryKeyOf(f);
+}
 
 function showTooltip(event, regionId, name){
   const tip = el("hover-tooltip");
@@ -1099,9 +1130,9 @@ async function adminToggleBan(uid, banned){
 
 async function releaseColor(uid, color){
   if (!color) return;
-  const hex = color.toLowerCase();
-  if (takenColors[hex] === uid || isAdmin) {
-    try { await set(ref(db, `colors/${hex}`), null); } catch (e) { /* 既に無い場合等は無視 */ }
+  const key = colorKey(color);
+  if (takenColors[key] === uid || isAdmin) {
+    try { await set(ref(db, `colors/${key}`), null); } catch (e) { /* 既に無い場合等は無視 */ }
   }
 }
 
@@ -1121,7 +1152,7 @@ async function adminResetToTrash(includeCountries){
     payload.countries = allCountries;
     for (const [uid, country] of Object.entries(allCountries)) {
       updates[`countries/${uid}`] = null;
-      if (country.color) updates[`colors/${country.color.toLowerCase()}`] = null;
+      if (country.color) updates[`colors/${colorKey(country.color)}`] = null;
     }
   }
   try {
@@ -1148,7 +1179,7 @@ async function adminRestoreTrash(trashId){
   if (entry.countries) {
     for (const [uid, country] of Object.entries(entry.countries)) {
       updates[`countries/${uid}`] = country;
-      if (country.color) updates[`colors/${country.color.toLowerCase()}`] = uid;
+      if (country.color) updates[`colors/${colorKey(country.color)}`] = uid;
     }
   }
   updates[`trash/${trashId}`] = null;
@@ -1191,7 +1222,7 @@ async function adminForceDeleteCountry(uid){
     claims: Object.fromEntries(ownedClaims)
   };
   const updates = { [`trash/${trashId}`]: payload, [`countries/${uid}`]: null };
-  if (country.color) updates[`colors/${country.color.toLowerCase()}`] = null;
+  if (country.color) updates[`colors/${colorKey(country.color)}`] = null;
   for (const [regionId] of ownedClaims) updates[`claims/${regionId}`] = null;
   try {
     await update(ref(db), updates);
@@ -1199,6 +1230,46 @@ async function adminForceDeleteCountry(uid){
   } catch (e) {
     showToast("削除に失敗しました: " + e.message, "error");
   }
+}
+
+// ---------- 国単位で主張 ----------
+el("country-mode-btn").addEventListener("click", () => {
+  countryClaimMode = !countryClaimMode;
+  el("country-mode-btn").classList.toggle("active", countryClaimMode);
+  showToast(countryClaimMode ? "国単位で主張モード: ON(クリックした国全体を一括で主張します)" : "国単位で主張モード: OFF");
+});
+
+async function claimCountryGroup(regionId){
+  const key = regionCountryKey[regionId];
+  if (!key) { showToast("この区画は国データが無いため一括主張できません。個別にクリックしてください。", "error"); return; }
+  const groupIds = (countryGroups[key] || []).filter((id) => !restrictedRegionIds.has(id));
+  if (groupIds.length === 0) { showToast("主張できる区画がありません。", "error"); return; }
+
+  const byOwnerName = {};
+  let unclaimedCount = 0, ownCount = 0;
+  for (const id of groupIds) {
+    const c = claimsCache[id];
+    if (!c) { unclaimedCount++; continue; }
+    if (c.ownerUid === currentUser.uid) { ownCount++; continue; }
+    byOwnerName[c.name] = (byOwnerName[c.name] || 0) + 1;
+  }
+  const otherLines = Object.entries(byOwnerName).map(([n, c]) => `「${n}」${c}区画`).join("、");
+  let msg = `「${countryDisplayNames[key] || key}」全${groupIds.length}区画を一括で主張します。`;
+  if (otherLines) msg += ` うち ${otherLines} は他国の領土です。`;
+  msg += " よろしいですか?";
+
+  showConfirmModal(msg, async () => {
+    const updates = {};
+    for (const id of groupIds) {
+      updates[`claims/${id}`] = { ownerUid: currentUser.uid, name: myCountry.name, color: myCountry.color, updatedAt: serverTimestamp() };
+    }
+    try {
+      await update(ref(db), updates);
+      showToast(`「${countryDisplayNames[key] || key}」を主張しました(${groupIds.length}区画)`);
+    } catch (e) {
+      showToast("一括主張に失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
+    }
+  });
 }
 
 // ---------- クリック時の主張ロジック ----------
@@ -1212,6 +1283,12 @@ function onRegionClick(regionId, regionName){
     return;
   }
   if (!myCountry) { openClaimModal(); return; }
+
+  if (countryClaimMode) {
+    claimCountryGroup(regionId);
+    return;
+  }
+
   const existing = claimsCache[regionId];
   if (existing && existing.ownerUid !== currentUser.uid) {
     if (localStorage.getItem(SKIP_KEY) === "1") {
@@ -1280,13 +1357,15 @@ el("claim-save-btn").addEventListener("click", async () => {
   const color = el("claim-color-hex").value.trim();
   if (!name) { showToast("国名を入力してください。", "error"); return; }
   if (!/^#[0-9a-fA-F]{6}$/.test(color)) { showToast("色はカラーコード(#rrggbb)で指定してください。", "error"); return; }
+  const closeTo = tooCloseReason(color);
+  if (closeTo) { showToast(`${closeTo}に近い色は使えません。別の色を選んでください。`, "error"); return; }
 
   const existing = await get(ref(db, `countries/${currentUser.uid}`));
   if (existing.exists()) { showToast("すでに建国済みです。", "error"); el("claim-modal").classList.add("hidden"); return; }
 
   const hex = color.toLowerCase();
   try {
-    await set(ref(db, `colors/${hex}`), currentUser.uid);
+    await set(ref(db, `colors/${colorKey(hex)}`), currentUser.uid);
   } catch (e) {
     showToast("その色はすでに他の国が使っています。別の色を選んでください。", "error");
     return;
@@ -1307,11 +1386,38 @@ el("claim-save-btn").addEventListener("click", async () => {
   }
 });
 function randomAvailableHex(){
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 80; i++) {
     const c = "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
-    if (!takenColors[c.toLowerCase()]) return c;
+    if (!takenColors[colorKey(c)] && !isColorTooClose(c)) return c;
   }
   return "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+}
+
+// ---------- 使用できない色(白・海の色に近い)の判定 ----------
+const RESTRICTED_REFERENCE_COLORS = [
+  { name: "陸(白)", hex: "#F4F7FB" },
+  { name: "海", hex: "#1B5FA8" }
+];
+const COLOR_CLOSENESS_THRESHOLD = 60; // RGBユークリッド距離(0〜441)。小さいほど厳しい判定
+
+function hexToRgb(hex){
+  const h = hex.replace(/^#/, "");
+  return {
+    r: parseInt(h.substring(0, 2), 16),
+    g: parseInt(h.substring(2, 4), 16),
+    b: parseInt(h.substring(4, 6), 16)
+  };
+}
+function colorDistance(hexA, hexB){
+  const a = hexToRgb(hexA), b = hexToRgb(hexB);
+  return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+}
+function isColorTooClose(hex){
+  return RESTRICTED_REFERENCE_COLORS.some((ref) => colorDistance(hex, ref.hex) < COLOR_CLOSENESS_THRESHOLD);
+}
+function tooCloseReason(hex){
+  const hit = RESTRICTED_REFERENCE_COLORS.find((ref) => colorDistance(hex, ref.hex) < COLOR_CLOSENESS_THRESHOLD);
+  return hit ? hit.name : null;
 }
 
 // ---------- 自国の管理(サイドメニュー) ----------
@@ -1380,6 +1486,8 @@ el("edit-save-btn").addEventListener("click", async () => {
   const color = el("edit-color-hex").value.trim();
   if (!name) { showToast("国名を入力してください。", "error"); return; }
   if (!/^#[0-9a-fA-F]{6}$/.test(color)) { showToast("色はカラーコードで指定してください。", "error"); return; }
+  const closeTo = tooCloseReason(color);
+  if (closeTo) { showToast(`${closeTo}に近い色は使えません。別の色を選んでください。`, "error"); return; }
 
   const newHex = color.toLowerCase();
   const oldHex = (myCountry.color || "").toLowerCase();
@@ -1387,7 +1495,7 @@ el("edit-save-btn").addEventListener("click", async () => {
 
   if (colorChanged) {
     try {
-      await set(ref(db, `colors/${newHex}`), currentUser.uid);
+      await set(ref(db, `colors/${colorKey(newHex)}`), currentUser.uid);
     } catch (e) {
       showToast("その色はすでに他の国が使っています。別の色を選んでください。", "error");
       return;
