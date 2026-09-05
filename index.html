@@ -966,8 +966,16 @@ function isAntarcticaFeature(f){
   return text.includes("antarctica") || text === "aq" || text.includes(" aq ") || p.iso_a2 === "AQ" || p.adm0_a3 === "ATA";
 }
 
+function isValidClaimEntry(v){
+  return !!v && typeof v === "object" && typeof v.name === "string" && typeof v.color === "string";
+}
 function claimantsOf(regionId){
-  return claimsCache[regionId] || {};
+  const raw = claimsCache[regionId] || {};
+  const valid = {};
+  for (const [uid, v] of Object.entries(raw)) {
+    if (isValidClaimEntry(v)) valid[uid] = v;
+  }
+  return valid;
 }
 function claimantList(regionId){
   return Object.entries(claimantsOf(regionId)).map(([uid, c]) => ({ uid, ...c }));
@@ -1081,9 +1089,22 @@ function watchMyCountry(){
     window.__diag("countriesの読み取りに失敗: [" + error.code + "] " + error.message + "(Realtime Databaseのルールを確認してください)", "error");
   });
 }
+function sanitizeClaimsTree(raw){
+  const clean = {};
+  for (const [regionId, regionClaims] of Object.entries(raw || {})) {
+    if (!regionClaims || typeof regionClaims !== "object") continue;
+    const validEntries = {};
+    for (const [uid, v] of Object.entries(regionClaims)) {
+      if (isValidClaimEntry(v)) validEntries[uid] = v;
+    }
+    if (Object.keys(validEntries).length > 0) clean[regionId] = validEntries;
+  }
+  return clean;
+}
+
 function watchClaims(){
   onValue(ref(db, "claims"), (snap) => {
-    const newClaims = snap.val() || {};
+    const newClaims = sanitizeClaimsTree(snap.val() || {});
     const changedIds = diffClaimIds(claimsCache, newClaims);
     claimsCache = newClaims;
     applyClaimColors(changedIds);
