@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>麺Earth 領土主張</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js" defer></script>
 
 <style>
   :root{
@@ -458,6 +459,7 @@
     <div id="empty-hint" class="hud hidden">
       <span class="corner corner-tl"></span><span class="corner corner-tr"></span>
       <span class="corner corner-bl"></span><span class="corner corner-br"></span>
+      <button id="empty-hint-close-btn" class="icon-btn" aria-label="閉じる" style="position:absolute; top:2px; right:2px; font-size:14px; padding:2px 7px;">×</button>
       まだ国がありません。「建国する」から国名と色を決めると、地図の区画をクリックして領土にできます。
       <div><button id="empty-hint-found-btn" class="btn btn-sm btn-fill">建国する</button></div>
     </div>
@@ -562,6 +564,10 @@
     <button id="nation-clear-highlight-btn" class="btn btn-sm hidden" style="margin:8px 0;">強調表示を解除</button>
     <div id="nation-list"></div>
     <div id="nation-empty" class="admin-empty">まだ国はありません。</div>
+
+    <h3 style="margin-top:22px; font-size:13px; color:var(--text-dim); font-weight:500;">係争中の区画</h3>
+    <div id="contested-list" class="region-list"></div>
+    <div id="contested-empty" class="admin-empty">係争中の区画はありません。</div>
   </div>
 
   <!-- 汎用確認モーダル -->
@@ -895,6 +901,7 @@ async function initMapOnce() {
 
   const projection = d3.geoNaturalEarth1().fitSize([width, height], geo);
   const path = d3.geoPath().projection(projection);
+  svg.append("defs").attr("id", "map-defs");
   const g = svg.append("g").style("will-change", "transform");
 
   pathSelection = g.selectAll("path")
@@ -959,21 +966,63 @@ function isAntarcticaFeature(f){
   return text.includes("antarctica") || text === "aq" || text.includes(" aq ") || p.iso_a2 === "AQ" || p.adm0_a3 === "ATA";
 }
 
+function claimantsOf(regionId){
+  return claimsCache[regionId] || {};
+}
+function claimantList(regionId){
+  return Object.entries(claimantsOf(regionId)).map(([uid, c]) => ({ uid, ...c }));
+}
+
 function showTooltip(event, regionId, name){
   const tip = el("hover-tooltip");
-  const claim = claimsCache[regionId];
   tip.classList.remove("hidden");
   tip.style.left = event.offsetX + 14 + "px";
   tip.style.top = event.offsetY + 14 + "px";
   if (restrictedRegionIds.has(regionId)) {
     tip.innerHTML = `${escapeHtml(name)}<br><span class="mono">主張禁止(大陸規模)</span>`;
+    return;
+  }
+  const claimants = claimantList(regionId);
+  if (claimants.length === 0) {
+    tip.innerHTML = escapeHtml(name);
+  } else if (claimants.length === 1) {
+    tip.innerHTML = `${escapeHtml(name)}<br><span class="mono">${escapeHtml(claimants[0].name)}</span>`;
   } else {
-    tip.innerHTML = claim
-      ? `${escapeHtml(name)}<br><span class="mono">${escapeHtml(claim.name)}</span>`
-      : escapeHtml(name);
+    const names = claimants.map((c) => escapeHtml(c.name)).join(" VS ");
+    tip.innerHTML = `${escapeHtml(name)}<br><span class="mono">${names}(係争中)</span>`;
   }
 }
 function hideTooltip(){ el("hover-tooltip").classList.add("hidden"); }
+
+// ---------- 係争地の斜線パターン(複数の国が同じ区画を主張した場合) ----------
+const stripePatternCache = new Set();
+function stripePatternId(colors){
+  return "stripe-" + colors.map((c) => c.replace("#", "")).join("-");
+}
+function ensureStripePattern(colors){
+  const id = stripePatternId(colors);
+  if (stripePatternCache.has(id)) return id;
+  stripePatternCache.add(id);
+  const defs = d3.select("#map-defs");
+  const n = colors.length;
+  const size = 6 * n;
+  const stripeWidth = size / n;
+  const pattern = defs.append("pattern")
+    .attr("id", id)
+    .attr("patternUnits", "userSpaceOnUse")
+    .attr("width", size)
+    .attr("height", size)
+    .attr("patternTransform", "rotate(45)");
+  colors.forEach((c, i) => {
+    pattern.append("rect")
+      .attr("x", i * stripeWidth)
+      .attr("y", 0)
+      .attr("width", stripeWidth)
+      .attr("height", size)
+      .attr("fill", c);
+  });
+  return id;
+}
 
 function applyClaimColors(ids){
   if (!pathSelection) return;
@@ -981,18 +1030,27 @@ function applyClaimColors(ids){
   for (const id of targetIds) {
     const node = pathIndex.get(id);
     if (!node) continue;
-    const claim = restrictedRegionIds.has(id) ? null : claimsCache[id];
     const sel = d3.select(node);
-    sel.style("fill", claim ? claim.color : null);
-    if (claim) {
-      const c = d3.color(claim.color);
-      sel.style("stroke", c ? c.darker(0.6) : claim.color);
+    const claimants = restrictedRegionIds.has(id) ? [] : claimantList(id);
+
+    if (claimants.length === 0) {
+      sel.style("fill", null).style("stroke", null).style("stroke-width", null);
+    } else if (claimants.length === 1) {
+      const color = claimants[0].color;
+      sel.style("fill", color);
+      const c = d3.color(color);
+      sel.style("stroke", c ? c.darker(0.6) : color).style("stroke-width", null);
     } else {
-      sel.style("stroke", null);
+      const colors = claimants.map((c) => c.color);
+      const patternId = ensureStripePattern(colors);
+      sel.style("fill", `url(#${patternId})`);
+      sel.style("stroke", "rgba(20,20,20,0.7)").style("stroke-width", 0.9);
     }
-    sel.classed("is-claimed", !!claim);
-    sel.classed("is-highlighted", !!(highlightedUid && claim && claim.ownerUid === highlightedUid));
-    sel.classed("is-dimmed", !!(highlightedUid && claim && claim.ownerUid !== highlightedUid));
+
+    sel.classed("is-claimed", claimants.length > 0);
+    sel.classed("is-contested", claimants.length > 1);
+    sel.classed("is-highlighted", !!(highlightedUid && claimants.some((c) => c.uid === highlightedUid)));
+    sel.classed("is-dimmed", !!(highlightedUid && claimants.length > 0 && !claimants.some((c) => c.uid === highlightedUid)));
   }
 }
 
@@ -1000,9 +1058,14 @@ function diffClaimIds(oldClaims, newClaims){
   const ids = new Set([...Object.keys(oldClaims), ...Object.keys(newClaims)]);
   const changed = [];
   for (const id of ids) {
-    const a = oldClaims[id], b = newClaims[id];
-    if (!a && !b) continue;
-    if (!a || !b || a.color !== b.color || a.ownerUid !== b.ownerUid) changed.push(id);
+    const a = oldClaims[id] || {}, b = newClaims[id] || {};
+    const uidsA = Object.keys(a), uidsB = Object.keys(b);
+    if (uidsA.length !== uidsB.length) { changed.push(id); continue; }
+    let same = true;
+    for (const uid of uidsB) {
+      if (!a[uid] || a[uid].color !== b[uid].color || a[uid].name !== b[uid].name) { same = false; break; }
+    }
+    if (!same) changed.push(id);
   }
   return changed;
 }
@@ -1026,6 +1089,7 @@ function watchClaims(){
     applyClaimColors(changedIds);
     renderSideMenu();
     renderLegend();
+    renderNationList();
     if (isAdmin) renderAdminCountryList();
   }, (error) => {
     window.__diag("claimsの読み取りに失敗: [" + error.code + "] " + error.message + "(Realtime Databaseのルールを確認してください)", "error");
@@ -1165,16 +1229,23 @@ function watchTrash(){
 function renderTopBar(){
   el("found-nation-btn").classList.toggle("hidden", !!myCountry);
 }
+let emptyHintDismissed = false;
 function renderEmptyHint(){
-  el("empty-hint").classList.toggle("hidden", !!myCountry);
+  el("empty-hint").classList.toggle("hidden", !!myCountry || emptyHintDismissed);
 }
+el("empty-hint-close-btn").addEventListener("click", () => {
+  emptyHintDismissed = true;
+  el("empty-hint").classList.add("hidden");
+});
 
 // ---------- 凡例 ----------
 function renderLegend(){
   const byOwner = {};
-  for (const claim of Object.values(claimsCache)) {
-    if (!byOwner[claim.ownerUid]) byOwner[claim.ownerUid] = { name: claim.name, color: claim.color, count: 0 };
-    byOwner[claim.ownerUid].count++;
+  for (const regionClaims of Object.values(claimsCache)) {
+    for (const [uid, claim] of Object.entries(regionClaims || {})) {
+      if (!byOwner[uid]) byOwner[uid] = { name: claim.name, color: claim.color, count: 0 };
+      byOwner[uid].count++;
+    }
   }
   const entries = Object.values(byOwner).sort((a, b) => b.count - a.count);
   const list = el("legend-list");
@@ -1221,7 +1292,7 @@ function renderNationList(){
   el("nation-empty").classList.toggle("hidden", entries.length > 0);
   el("nation-clear-highlight-btn").classList.toggle("hidden", !highlightedUid);
   for (const [uid, country] of entries) {
-    const count = Object.values(claimsCache).filter((c) => c.ownerUid === uid).length;
+    const count = Object.values(claimsCache).filter((regionClaims) => regionClaims && regionClaims[uid]).length;
     const row = document.createElement("div");
     row.className = "legend-row";
     row.style.cursor = "pointer";
@@ -1230,6 +1301,22 @@ function renderNationList(){
                       <span class="legend-name" style="color:var(--text)">${escapeHtml(country.name)}</span>
                       <span class="legend-count mono">${count}</span>`;
     row.addEventListener("click", () => toggleHighlight(uid));
+    list.appendChild(row);
+  }
+  renderContestedList();
+}
+
+function renderContestedList(){
+  const list = el("contested-list");
+  if (!list || el("nation-panel").classList.contains("hidden")) return;
+  list.innerHTML = "";
+  const contestedEntries = Object.entries(claimsCache).filter(([, regionClaims]) => regionClaims && Object.keys(regionClaims).length > 1);
+  el("contested-empty").classList.toggle("hidden", contestedEntries.length > 0);
+  for (const [regionId, regionClaims] of contestedEntries) {
+    const names = Object.values(regionClaims).map((c) => c.name);
+    const row = document.createElement("div");
+    row.className = "region-row";
+    row.innerHTML = `<span>${escapeHtml(regionNames[regionId] || regionId)}: ${escapeHtml(names.join(" VS "))}</span>`;
     list.appendChild(row);
   }
 }
@@ -1348,7 +1435,7 @@ function renderAdminCountryList(){
   list.innerHTML = "";
   el("admin-country-empty").classList.toggle("hidden", entries.length > 0);
   for (const [uid, country] of entries) {
-    const count = Object.values(claimsCache).filter((c) => c.ownerUid === uid).length;
+    const count = Object.values(claimsCache).filter((regionClaims) => regionClaims && regionClaims[uid]).length;
     const isBanned = !!bannedCache[uid];
     const isCurrentlyAdmin = !!allAdmins[uid];
     const row = document.createElement("div");
@@ -1403,7 +1490,7 @@ function renderAdminCountryList(){
 }
 
 async function adminClearCountryClaims(uid, country){
-  const owned = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === uid);
+  const owned = Object.entries(claimsCache).filter(([, regionClaims]) => regionClaims && regionClaims[uid]);
   if (owned.length === 0) { showToast("この国はまだ領土を持っていません。"); return; }
   const trashId = String(Date.now());
   const now = Date.now();
@@ -1412,10 +1499,10 @@ async function adminClearCountryClaims(uid, country){
     expiresAt: now + TRASH_RETENTION_MS,
     createdBy: currentUser.uid,
     label: `「${country.name}」の領土を運営が削除`,
-    claims: Object.fromEntries(owned)
+    claims: Object.fromEntries(owned.map(([regionId, regionClaims]) => [regionId, { [uid]: regionClaims[uid] }]))
   };
   const updates = { [`trash/${trashId}`]: payload };
-  for (const [regionId] of owned) updates[`claims/${regionId}`] = null;
+  for (const [regionId] of owned) updates[`claims/${regionId}/${uid}`] = null;
   try {
     await update(ref(db), updates);
     showToast(`「${country.name}」の領土を削除しました`);
@@ -1478,8 +1565,10 @@ async function adminRestoreTrash(trashId){
   const entry = trashCache[trashId];
   if (!entry) return;
   const updates = {};
-  for (const [regionId, claim] of Object.entries(entry.claims || {})) {
-    updates[`claims/${regionId}`] = claim;
+  for (const [regionId, regionClaims] of Object.entries(entry.claims || {})) {
+    for (const [uid, data] of Object.entries(regionClaims || {})) {
+      updates[`claims/${regionId}/${uid}`] = data;
+    }
   }
   if (entry.countries) {
     for (const [uid, country] of Object.entries(entry.countries)) {
@@ -1515,7 +1604,7 @@ el("admin-purge-expired-btn").addEventListener("click", () => {
 async function adminForceDeleteCountry(uid){
   const country = allCountries[uid];
   if (!country) return;
-  const ownedClaims = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === uid);
+  const ownedClaims = Object.entries(claimsCache).filter(([, regionClaims]) => regionClaims && regionClaims[uid]);
   const trashId = String(Date.now());
   const now = Date.now();
   const payload = {
@@ -1524,11 +1613,11 @@ async function adminForceDeleteCountry(uid){
     createdBy: currentUser.uid,
     label: `「${country.name}」を運営が削除`,
     countries: { [uid]: country },
-    claims: Object.fromEntries(ownedClaims)
+    claims: Object.fromEntries(ownedClaims.map(([regionId, regionClaims]) => [regionId, { [uid]: regionClaims[uid] }]))
   };
   const updates = { [`trash/${trashId}`]: payload, [`countries/${uid}`]: null };
   if (country.color) updates[`colors/${colorKey(country.color)}`] = null;
-  for (const [regionId] of ownedClaims) updates[`claims/${regionId}`] = null;
+  for (const [regionId] of ownedClaims) updates[`claims/${regionId}/${uid}`] = null;
   try {
     await update(ref(db), updates);
     showToast(`「${country.name}」を削除しました`);
@@ -1552,23 +1641,29 @@ async function claimCountryGroup(regionId){
   const groupIds = (countryGroups[key] || []).filter((id) => !restrictedRegionIds.has(id));
   if (groupIds.length === 0) { showToast("主張できる区画がありません。", "error"); return; }
 
-  const byOwnerName = {};
-  let unclaimedCount = 0, ownCount = 0;
+  const byOtherName = {};
+  let alreadyMineCount = 0;
   for (const id of groupIds) {
-    const c = claimsCache[id];
-    if (!c) { unclaimedCount++; continue; }
-    if (c.ownerUid === currentUser.uid) { ownCount++; continue; }
-    byOwnerName[c.name] = (byOwnerName[c.name] || 0) + 1;
+    const claimants = claimantsOf(id);
+    if (claimants[currentUser.uid]) alreadyMineCount++;
+    for (const [uid, c] of Object.entries(claimants)) {
+      if (uid === currentUser.uid) continue;
+      byOtherName[c.name] = (byOtherName[c.name] || 0) + 1;
+    }
   }
-  const otherLines = Object.entries(byOwnerName).map(([n, c]) => `「${n}」${c}区画`).join("、");
+  if (alreadyMineCount === groupIds.length) {
+    showToast(`「${countryDisplayNames[key] || key}」はすでに全て主張済みです。`);
+    return;
+  }
+  const otherLines = Object.entries(byOtherName).map(([n, c]) => `「${n}」${c}区画`).join("、");
   let msg = `「${countryDisplayNames[key] || key}」全${groupIds.length}区画を一括で主張します。`;
-  if (otherLines) msg += ` うち ${otherLines} は他国の領土です。`;
+  if (otherLines) msg += ` うち ${otherLines} は他国も主張しており、あなたの主張が重なって係争地(斜線表示)になります。`;
   msg += " よろしいですか?";
 
   showSkippableConfirm(msg, COUNTRY_CLAIM_SKIP_KEY, async () => {
     const updates = {};
     for (const id of groupIds) {
-      updates[`claims/${id}`] = { ownerUid: currentUser.uid, name: myCountry.name, color: myCountry.color, updatedAt: serverTimestamp() };
+      updates[`claims/${id}/${currentUser.uid}`] = { name: myCountry.name, color: myCountry.color, updatedAt: serverTimestamp() };
     }
     try {
       await update(ref(db), updates);
@@ -1596,10 +1691,16 @@ function onRegionClick(regionId, regionName){
     return;
   }
 
-  const existing = claimsCache[regionId];
-  if (existing && existing.ownerUid !== currentUser.uid) {
+  const claimants = claimantsOf(regionId);
+  if (claimants[currentUser.uid]) {
+    showToast("現在主張済みです!");
+    return;
+  }
+  const otherClaimants = Object.values(claimants);
+  if (otherClaimants.length > 0) {
+    const names = otherClaimants.map((c) => `「${c.name}」`).join("、");
     showSkippableConfirm(
-      `ここを触ると「${existing.name}」も同じ範囲になりますがいいですか?`,
+      `ここは${names}が既に主張しています。あなたも主張を重ねますか?(係争地として斜線で表示されます)`,
       SKIP_KEY,
       () => claimRegion(regionId)
     );
@@ -1610,8 +1711,7 @@ function onRegionClick(regionId, regionName){
 
 async function claimRegion(regionId){
   try {
-    await set(ref(db, `claims/${regionId}`), {
-      ownerUid: currentUser.uid,
+    await set(ref(db, `claims/${regionId}/${currentUser.uid}`), {
       name: myCountry.name,
       color: myCountry.color,
       updatedAt: serverTimestamp()
@@ -1767,7 +1867,7 @@ function renderSideMenu(){
   el("edit-country-name").value = myCountry.name;
   el("edit-color-picker").value = myCountry.color;
   el("edit-color-hex").value = myCountry.color;
-  const owned = Object.entries(claimsCache).filter(([, c]) => c.ownerUid === currentUser.uid);
+  const owned = Object.entries(claimsCache).filter(([, regionClaims]) => regionClaims && regionClaims[currentUser.uid]).map(([regionId]) => [regionId]);
   el("edit-region-count").textContent = owned.length;
 
   // 地図データ上の国(admin属性)ごとにグループ化
@@ -1830,7 +1930,7 @@ function renderSideMenu(){
 
 async function releaseOwnRegion(regionId){
   try {
-    await set(ref(db, `claims/${regionId}`), null);
+    await set(ref(db, `claims/${regionId}/${currentUser.uid}`), null);
     showToast((regionNames[regionId] || regionId) + "の主張を解放しました。");
   } catch (e) {
     showToast("解放に失敗しました: [" + (e.code || "?") + "] " + e.message, "error");
@@ -1839,7 +1939,7 @@ async function releaseOwnRegion(regionId){
 
 async function releaseOwnRegions(regionIds, label){
   const updates = {};
-  for (const id of regionIds) updates[`claims/${id}`] = null;
+  for (const id of regionIds) updates[`claims/${id}/${currentUser.uid}`] = null;
   try {
     await update(ref(db), updates);
     showToast(`「${label}」の${regionIds.length}区画を解放しました。`);
@@ -1880,10 +1980,10 @@ el("edit-save-btn").addEventListener("click", async () => {
   const updates = {};
   updates[`countries/${currentUser.uid}/name`] = name;
   updates[`countries/${currentUser.uid}/color`] = newHex;
-  for (const [regionId, claim] of Object.entries(claimsCache)) {
-    if (claim.ownerUid === currentUser.uid) {
-      updates[`claims/${regionId}/name`] = name;
-      updates[`claims/${regionId}/color`] = newHex;
+  for (const [regionId, regionClaims] of Object.entries(claimsCache)) {
+    if (regionClaims && regionClaims[currentUser.uid]) {
+      updates[`claims/${regionId}/${currentUser.uid}/name`] = name;
+      updates[`claims/${regionId}/${currentUser.uid}/color`] = newHex;
     }
   }
   try {
@@ -1898,8 +1998,8 @@ el("edit-save-btn").addEventListener("click", async () => {
 el("edit-delete-country-btn").addEventListener("click", () => {
   showConfirmModal("建国を取り消し、すべての領土を解放します。よろしいですか?", async () => {
     const updates = { [`countries/${currentUser.uid}`]: null };
-    for (const [regionId, claim] of Object.entries(claimsCache)) {
-      if (claim.ownerUid === currentUser.uid) updates[`claims/${regionId}`] = null;
+    for (const [regionId, regionClaims] of Object.entries(claimsCache)) {
+      if (regionClaims && regionClaims[currentUser.uid]) updates[`claims/${regionId}/${currentUser.uid}`] = null;
     }
     try {
       await update(ref(db), updates);
