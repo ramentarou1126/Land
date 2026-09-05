@@ -882,7 +882,10 @@ async function initMapOnce() {
     if (key) {
       regionCountryKey[id] = key;
       (countryGroups[key] = countryGroups[key] || []).push(id);
-      if (!countryDisplayNames[key]) countryDisplayNames[key] = countryNameOf(f);
+      if (!countryDisplayNames[key]) {
+        const iso = (f.properties || {}).iso_a2;
+        countryDisplayNames[key] = (iso && COUNTRY_NAME_JA[iso]) || countryNameOf(f);
+      }
     }
   }
   if (dupCount > 0) {
@@ -960,6 +963,45 @@ function countryNameOf(f){
   const p = f.properties || {};
   return p.admin || p.sovereignt || countryKeyOf(f);
 }
+
+// ISO 3166-1 alpha-2 → 日本語の国名(主要国。無い場合は英語表記のまま)
+const COUNTRY_NAME_JA = {
+  JP:"日本", KR:"韓国", KP:"北朝鮮", CN:"中国", TW:"台湾", HK:"香港", MO:"マカオ", MN:"モンゴル",
+  US:"アメリカ合衆国", CA:"カナダ", MX:"メキシコ",
+  GB:"イギリス", IE:"アイルランド", FR:"フランス", DE:"ドイツ", IT:"イタリア", ES:"スペイン", PT:"ポルトガル",
+  NL:"オランダ", BE:"ベルギー", LU:"ルクセンブルク", CH:"スイス", AT:"オーストリア", LI:"リヒテンシュタイン",
+  SE:"スウェーデン", NO:"ノルウェー", DK:"デンマーク", FI:"フィンランド", IS:"アイスランド",
+  PL:"ポーランド", CZ:"チェコ", SK:"スロバキア", HU:"ハンガリー", RO:"ルーマニア", BG:"ブルガリア",
+  GR:"ギリシャ", CY:"キプロス", MT:"マルタ", HR:"クロアチア", SI:"スロベニア", BA:"ボスニア・ヘルツェゴビナ",
+  RS:"セルビア", ME:"モンテネグロ", MK:"北マケドニア", AL:"アルバニア", XK:"コソボ",
+  UA:"ウクライナ", BY:"ベラルーシ", MD:"モルドバ", RU:"ロシア",
+  EE:"エストニア", LV:"ラトビア", LT:"リトアニア",
+  TR:"トルコ", GE:"ジョージア", AM:"アルメニア", AZ:"アゼルバイジャン",
+  IL:"イスラエル", PS:"パレスチナ", LB:"レバノン", SY:"シリア", JO:"ヨルダン", IQ:"イラク", IR:"イラン",
+  SA:"サウジアラビア", YE:"イエメン", OM:"オマーン", AE:"アラブ首長国連邦", QA:"カタール", BH:"バーレーン", KW:"クウェート",
+  AF:"アフガニスタン", PK:"パキスタン", IN:"インド", NP:"ネパール", BT:"ブータン", BD:"バングラデシュ", LK:"スリランカ", MV:"モルディブ",
+  KZ:"カザフスタン", UZ:"ウズベキスタン", TM:"トルクメニスタン", TJ:"タジキスタン", KG:"キルギス",
+  TH:"タイ", VN:"ベトナム", LA:"ラオス", KH:"カンボジア", MM:"ミャンマー", MY:"マレーシア", SG:"シンガポール",
+  ID:"インドネシア", PH:"フィリピン", BN:"ブルネイ", TL:"東ティモール",
+  AU:"オーストラリア", NZ:"ニュージーランド", PG:"パプアニューギニア", FJ:"フィジー", SB:"ソロモン諸島",
+  VU:"バヌアツ", WS:"サモア", TO:"トンガ", KI:"キリバス", TV:"ツバル", NR:"ナウル", PW:"パラオ",
+  FM:"ミクロネシア連邦", MH:"マーシャル諸島",
+  EG:"エジプト", LY:"リビア", TN:"チュニジア", DZ:"アルジェリア", MA:"モロッコ", SD:"スーダン", SS:"南スーダン",
+  ET:"エチオピア", ER:"エリトリア", DJ:"ジブチ", SO:"ソマリア", KE:"ケニア", UG:"ウガンダ", TZ:"タンザニア",
+  RW:"ルワンダ", BI:"ブルンジ", CD:"コンゴ民主共和国", CG:"コンゴ共和国", CF:"中央アフリカ共和国", CM:"カメルーン",
+  TD:"チャド", NE:"ニジェール", NG:"ナイジェリア", BJ:"ベナン", TG:"トーゴ", GH:"ガーナ", CI:"コートジボワール",
+  LR:"リベリア", SL:"シエラレオネ", GN:"ギニア", GW:"ギニアビサウ", SN:"セネガル", GM:"ガンビア", ML:"マリ",
+  BF:"ブルキナファソ", MR:"モーリタニア", GA:"ガボン", GQ:"赤道ギニア", ST:"サントメ・プリンシペ",
+  AO:"アンゴラ", ZM:"ザンビア", ZW:"ジンバブエ", MZ:"モザンビーク", MW:"マラウイ", NA:"ナミビア",
+  BW:"ボツワナ", ZA:"南アフリカ", LS:"レソト", SZ:"エスワティニ", MG:"マダガスカル", MU:"モーリシャス",
+  SC:"セーシェル", KM:"コモロ",
+  BR:"ブラジル", AR:"アルゼンチン", CL:"チリ", PE:"ペルー", CO:"コロンビア", VE:"ベネズエラ", EC:"エクアドル",
+  BO:"ボリビア", PY:"パラグアイ", UY:"ウルグアイ", GY:"ガイアナ", SR:"スリナム", GF:"フランス領ギアナ",
+  CU:"キューバ", JM:"ジャマイカ", HT:"ハイチ", DO:"ドミニカ共和国", BS:"バハマ", BB:"バルバドス",
+  TT:"トリニダード・トバゴ", GT:"グアテマラ", BZ:"ベリーズ", HN:"ホンジュラス", SV:"エルサルバドル",
+  NI:"ニカラグア", CR:"コスタリカ", PA:"パナマ",
+  GL:"グリーンランド", FO:"フェロー諸島"
+};
 function isAntarcticaFeature(f){
   const p = f.properties || {};
   const text = [p.admin, p.sovereignt, p.name, p.iso_a2, p.adm0_a3].filter(Boolean).join(" ").toLowerCase();
@@ -1273,7 +1315,11 @@ function renderLegend(){
   const entries = Object.values(byOwner).sort((a, b) => b.count - a.count);
   const list = el("legend-list");
   list.innerHTML = "";
+  const hasAnyClaim = Object.values(claimsCache).some((regionClaims) => Object.keys(regionClaims || {}).length > 0);
   el("legend-empty").classList.toggle("hidden", entries.length > 0);
+  el("legend-empty").textContent = hasAnyClaim
+    ? "主張が被っている領土しかありません。"
+    : "まだ主張された領土はありません。";
   for (const c of entries) {
     const row = document.createElement("div");
     row.className = "legend-row";
