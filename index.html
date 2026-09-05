@@ -1052,7 +1052,7 @@ function applyClaimColors(ids){
       const colors = claimants.map((c) => c.color);
       const patternId = ensureStripePattern(colors);
       sel.style("fill", `url(#${patternId})`);
-      sel.style("stroke", "rgba(20,20,20,0.7)").style("stroke-width", 0.9);
+      sel.style("stroke", "rgba(20,50,90,0.75)").style("stroke-width", 0.7);
     }
 
     sel.classed("is-claimed", claimants.length > 0);
@@ -1263,10 +1263,12 @@ el("empty-hint-close-btn").addEventListener("click", () => {
 function renderLegend(){
   const byOwner = {};
   for (const regionClaims of Object.values(claimsCache)) {
-    for (const [uid, claim] of Object.entries(regionClaims || {})) {
-      if (!byOwner[uid]) byOwner[uid] = { name: claim.name, color: claim.color, count: 0 };
-      byOwner[uid].count++;
-    }
+    const uids = Object.keys(regionClaims || {});
+    if (uids.length !== 1) continue; // 係争中(2ヶ国以上)の区画は「治めている」数に含めない
+    const uid = uids[0];
+    const claim = regionClaims[uid];
+    if (!byOwner[uid]) byOwner[uid] = { name: claim.name, color: claim.color, count: 0 };
+    byOwner[uid].count++;
   }
   const entries = Object.values(byOwner).sort((a, b) => b.count - a.count);
   const list = el("legend-list");
@@ -1313,7 +1315,10 @@ function renderNationList(){
   el("nation-empty").classList.toggle("hidden", entries.length > 0);
   el("nation-clear-highlight-btn").classList.toggle("hidden", !highlightedUid);
   for (const [uid, country] of entries) {
-    const count = Object.values(claimsCache).filter((regionClaims) => regionClaims && regionClaims[uid]).length;
+    const count = Object.values(claimsCache).filter((regionClaims) => {
+      const uids = Object.keys(regionClaims || {});
+      return uids.length === 1 && uids[0] === uid;
+    }).length;
     const row = document.createElement("div");
     row.className = "legend-row";
     row.style.cursor = "pointer";
@@ -1327,17 +1332,54 @@ function renderNationList(){
   renderContestedList();
 }
 
+let expandedContestGroups = new Set();
 function renderContestedList(){
   const list = el("contested-list");
   if (!list || el("nation-panel").classList.contains("hidden")) return;
   list.innerHTML = "";
-  const contestedEntries = Object.entries(claimsCache).filter(([, regionClaims]) => regionClaims && Object.keys(regionClaims).length > 1);
-  el("contested-empty").classList.toggle("hidden", contestedEntries.length > 0);
-  for (const [regionId, regionClaims] of contestedEntries) {
-    const names = Object.values(regionClaims).map((c) => c.name);
+
+  // 争っている国の組み合わせ(uidの集合)ごとにまとめる
+  const groups = new Map(); // key -> { names: [...], regionIds: [...] }
+  for (const [regionId, regionClaims] of Object.entries(claimsCache)) {
+    const uids = Object.keys(regionClaims || {});
+    if (uids.length < 2) continue;
+    const key = [...uids].sort().join("|");
+    if (!groups.has(key)) {
+      groups.set(key, { names: uids.map((uid) => regionClaims[uid].name), regionIds: [] });
+    }
+    groups.get(key).regionIds.push(regionId);
+  }
+
+  el("contested-empty").classList.toggle("hidden", groups.size > 0);
+
+  for (const [key, group] of groups) {
     const row = document.createElement("div");
     row.className = "region-row";
-    row.innerHTML = `<span>${escapeHtml(regionNames[regionId] || regionId)}: ${escapeHtml(names.join(" VS "))}</span>`;
+    row.style.flexDirection = "column";
+    row.style.alignItems = "stretch";
+    row.style.cursor = "pointer";
+
+    const headerLine = document.createElement("div");
+    headerLine.style.display = "flex";
+    headerLine.style.justifyContent = "space-between";
+    headerLine.innerHTML = `<span>${escapeHtml(group.names.join(" VS "))}</span><span class="mono" style="color:var(--text-dim);">${group.regionIds.length}区画${expandedContestGroups.has(key) ? " ▲" : " ▼"}</span>`;
+    row.appendChild(headerLine);
+
+    if (expandedContestGroups.has(key)) {
+      const detail = document.createElement("div");
+      detail.style.marginTop = "6px";
+      detail.style.fontSize = "11px";
+      detail.style.color = "var(--text-dim)";
+      detail.textContent = group.regionIds.map((id) => regionNames[id] || id).join("、");
+      row.appendChild(detail);
+    }
+
+    row.addEventListener("click", () => {
+      if (expandedContestGroups.has(key)) expandedContestGroups.delete(key);
+      else expandedContestGroups.add(key);
+      renderContestedList();
+    });
+
     list.appendChild(row);
   }
 }
