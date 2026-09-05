@@ -1776,6 +1776,7 @@ el("view-only-btn").addEventListener("click", () => {
 
 // ---------- 画像として保存 ----------
 el("screenshot-btn").addEventListener("click", () => {
+  const newTab = window.open("", "_blank"); // クリック直後に同期的に開いておく(ポップアップブロック対策)
   try {
     const svgEl = document.getElementById("map-svg");
     const clone = svgEl.cloneNode(true);
@@ -1810,20 +1811,28 @@ el("screenshot-btn").addEventListener("click", () => {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(url);
       canvas.toBlob((blob) => {
-        if (!blob) { showToast("画像の生成に失敗しました。", "error"); return; }
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "menearth-map.png";
-        a.click();
-        showToast("画像を保存しました。");
+        if (!blob) {
+          if (newTab) newTab.close();
+          showToast("画像の生成に失敗しました。", "error");
+          return;
+        }
+        const blobUrl = URL.createObjectURL(blob);
+        if (newTab && !newTab.closed) {
+          newTab.location.href = blobUrl;
+        } else {
+          window.open(blobUrl, "_blank");
+        }
+        showToast("新しいタブに画像を開きました。画像を長押し(PCは右クリック)して「画像を保存」を選んでください。");
       }, "image/png");
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
+      if (newTab) newTab.close();
       showToast("画像の生成に失敗しました。", "error");
     };
     img.src = url;
   } catch (e) {
+    if (newTab) newTab.close();
     showToast("画像の保存に失敗しました: " + e.message, "error");
   }
 });
