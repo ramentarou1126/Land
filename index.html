@@ -158,7 +158,7 @@
   #map-svg path:hover{ fill: #D9E6F5; stroke: var(--cyan); stroke-width:0.8; }
 
   /* 閲覧専用モード: 目ボタンとカメラボタン以外の操作UIを隠す */
-  body.view-only #top-bar-right > *:not(#view-only-btn):not(#screenshot-btn){ display:none !important; }
+  body.view-only #top-bar-right > *:not(#view-only-btn){ display:none !important; }
   body.view-only #legend{ display:none !important; }
   body.view-only #empty-hint{ display:none !important; }
   body.view-only #diag-toggle-btn{ display:none !important; }
@@ -454,7 +454,6 @@
       <button id="admin-open-btn" class="icon-btn hidden" title="運営パネル" aria-label="運営パネル">⚙</button>
       <button id="nation-open-btn" class="icon-btn" title="国家リスト" aria-label="国家リスト">🏳</button>
       <button id="country-mode-btn" class="icon-btn" title="国単位で主張" aria-label="国単位で主張">🌐</button>
-      <button id="screenshot-btn" class="icon-btn" title="画像として保存" aria-label="画像として保存">📷</button>
       <button id="view-only-btn" class="icon-btn" title="閲覧専用モード" aria-label="閲覧専用モード">👁️</button>
       <button id="found-nation-btn" class="btn btn-fill hidden">建国する</button>
       <button id="menu-btn" class="icon-btn" title="自国の管理" aria-label="自国の管理">☰</button>
@@ -1772,69 +1771,6 @@ el("view-only-btn").addEventListener("click", () => {
   viewOnlyMode = !viewOnlyMode;
   document.body.classList.toggle("view-only", viewOnlyMode);
   el("view-only-btn").classList.toggle("active", viewOnlyMode);
-});
-
-// ---------- 画像として保存 ----------
-el("screenshot-btn").addEventListener("click", () => {
-  const newTab = window.open("", "_blank"); // クリック直後に同期的に開いておく(ポップアップブロック対策)
-  try {
-    const svgEl = document.getElementById("map-svg");
-    const clone = svgEl.cloneNode(true);
-    const originalPaths = svgEl.querySelectorAll("path");
-    const clonedPaths = clone.querySelectorAll("path");
-    originalPaths.forEach((p, i) => {
-      const cs = getComputedStyle(p);
-      clonedPaths[i].setAttribute("fill", cs.fill);
-      clonedPaths[i].setAttribute("stroke", cs.stroke);
-      clonedPaths[i].setAttribute("stroke-width", cs.strokeWidth);
-    });
-    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const bbox = svgEl.getBoundingClientRect();
-    const w = Math.max(1, Math.round(bbox.width));
-    const h = Math.max(1, Math.round(bbox.height));
-    clone.setAttribute("width", w);
-    clone.setAttribute("height", h);
-
-    const svgString = new XMLSerializer().serializeToString(clone);
-    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
-
-    const img = new Image();
-    img.onload = () => {
-      const scale = 2; // 高解像度で保存
-      const canvas = document.createElement("canvas");
-      canvas.width = w * scale;
-      canvas.height = h * scale;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = getComputedStyle(document.getElementById("map-wrap")).backgroundColor || "#1B5FA8";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          if (newTab) newTab.close();
-          showToast("画像の生成に失敗しました。", "error");
-          return;
-        }
-        const blobUrl = URL.createObjectURL(blob);
-        if (newTab && !newTab.closed) {
-          newTab.location.href = blobUrl;
-        } else {
-          window.open(blobUrl, "_blank");
-        }
-        showToast("新しいタブに画像を開きました。画像を長押し(PCは右クリック)して「画像を保存」を選んでください。");
-      }, "image/png");
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      if (newTab) newTab.close();
-      showToast("画像の生成に失敗しました。", "error");
-    };
-    img.src = url;
-  } catch (e) {
-    if (newTab) newTab.close();
-    showToast("画像の保存に失敗しました: " + e.message, "error");
-  }
 });
 
 const COUNTRY_CLAIM_SKIP_KEY = "menearth_skip_country_claim_confirm";
