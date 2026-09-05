@@ -156,6 +156,14 @@
     fill: var(--land);
   }
   #map-svg path:hover{ fill: #D9E6F5; stroke: var(--cyan); stroke-width:0.8; }
+
+  /* 閲覧専用モード: 目ボタンとカメラボタン以外の操作UIを隠す */
+  body.view-only #top-bar-right > *:not(#view-only-btn):not(#screenshot-btn){ display:none !important; }
+  body.view-only #legend{ display:none !important; }
+  body.view-only #empty-hint{ display:none !important; }
+  body.view-only #diag-toggle-btn{ display:none !important; }
+  body.view-only #hover-tooltip{ display:none !important; }
+  body.view-only #map-svg{ cursor: default; }
   #map-svg path.is-claimed{ stroke: rgba(20,30,50,0.35); stroke-width: 0.6; }
   #map-svg path.is-restricted{ fill: var(--land-restricted) !important; cursor: not-allowed; }
   #map-svg path.is-restricted:hover{ fill: var(--land-restricted) !important; stroke: var(--land-line); stroke-width:0.4; }
@@ -446,6 +454,8 @@
       <button id="admin-open-btn" class="icon-btn hidden" title="運営パネル" aria-label="運営パネル">⚙</button>
       <button id="nation-open-btn" class="icon-btn" title="国家リスト" aria-label="国家リスト">🏳</button>
       <button id="country-mode-btn" class="icon-btn" title="国単位で主張" aria-label="国単位で主張">🌐</button>
+      <button id="screenshot-btn" class="icon-btn" title="画像として保存" aria-label="画像として保存">📷</button>
+      <button id="view-only-btn" class="icon-btn" title="閲覧専用モード" aria-label="閲覧専用モード">👁️</button>
       <button id="found-nation-btn" class="btn btn-fill hidden">建国する</button>
       <button id="menu-btn" class="icon-btn" title="自国の管理" aria-label="自国の管理">☰</button>
     </div>
@@ -683,6 +693,7 @@ let regionNames = {};
 let restrictedRegionIds = new Set();
 let highlightedUid = null;
 let countryClaimMode = false;
+let viewOnlyMode = false;
 let countryGroups = {};      // countryKey -> [regionId, ...]
 let regionCountryKey = {};   // regionId -> countryKey
 let countryDisplayNames = {}; // countryKey -> 表示名
@@ -869,7 +880,7 @@ async function initMapOnce() {
   restrictedRegionIds = new Set();
   for (const f of geo.features) {
     const id = regionIdOf(f);
-    regionNames[id] = regionNameOf(f);
+    regionNames[id] = JP_PREFECTURE_NAME_JA[id] || regionNameOf(f);
     if (seenIds[id]) dupCount++;
     seenIds[id] = true;
 
@@ -939,7 +950,7 @@ async function initMapOnce() {
     .on("mouseleave", hideTooltip);
 
   svg.call(
-    d3.zoom().scaleExtent([1, 8])
+    d3.zoom().scaleExtent([1, 20])
       .translateExtent([[0, 0], [width, height]]) // 世界地図の外側までパンできないよう範囲を制限
       .extent([[0, 0], [width, height]])
       .on("start", () => { g.style("pointer-events", "none"); })
@@ -1001,6 +1012,20 @@ const COUNTRY_NAME_JA = {
   TT:"トリニダード・トバゴ", GT:"グアテマラ", BZ:"ベリーズ", HN:"ホンジュラス", SV:"エルサルバドル",
   NI:"ニカラグア", CR:"コスタリカ", PA:"パナマ",
   GL:"グリーンランド", FO:"フェロー諸島"
+};
+
+// ISO 3166-2:JP コード → 都道府県名
+const JP_PREFECTURE_NAME_JA = {
+  "JP-01":"北海道", "JP-02":"青森県", "JP-03":"岩手県", "JP-04":"宮城県", "JP-05":"秋田県",
+  "JP-06":"山形県", "JP-07":"福島県", "JP-08":"茨城県", "JP-09":"栃木県", "JP-10":"群馬県",
+  "JP-11":"埼玉県", "JP-12":"千葉県", "JP-13":"東京都", "JP-14":"神奈川県", "JP-15":"新潟県",
+  "JP-16":"富山県", "JP-17":"石川県", "JP-18":"福井県", "JP-19":"山梨県", "JP-20":"長野県",
+  "JP-21":"岐阜県", "JP-22":"静岡県", "JP-23":"愛知県", "JP-24":"三重県", "JP-25":"滋賀県",
+  "JP-26":"京都府", "JP-27":"大阪府", "JP-28":"兵庫県", "JP-29":"奈良県", "JP-30":"和歌山県",
+  "JP-31":"鳥取県", "JP-32":"島根県", "JP-33":"岡山県", "JP-34":"広島県", "JP-35":"山口県",
+  "JP-36":"徳島県", "JP-37":"香川県", "JP-38":"愛媛県", "JP-39":"高知県", "JP-40":"福岡県",
+  "JP-41":"佐賀県", "JP-42":"長崎県", "JP-43":"熊本県", "JP-44":"大分県", "JP-45":"宮崎県",
+  "JP-46":"鹿児島県", "JP-47":"沖縄県"
 };
 function isAntarcticaFeature(f){
   const p = f.properties || {};
@@ -1742,6 +1767,67 @@ el("country-mode-btn").addEventListener("click", () => {
   showToast(countryClaimMode ? "国単位で主張モード: ON(クリックした国全体を一括で主張します)" : "国単位で主張モード: OFF");
 });
 
+// ---------- 閲覧専用モード ----------
+el("view-only-btn").addEventListener("click", () => {
+  viewOnlyMode = !viewOnlyMode;
+  document.body.classList.toggle("view-only", viewOnlyMode);
+  el("view-only-btn").classList.toggle("active", viewOnlyMode);
+});
+
+// ---------- 画像として保存 ----------
+el("screenshot-btn").addEventListener("click", () => {
+  try {
+    const svgEl = document.getElementById("map-svg");
+    const clone = svgEl.cloneNode(true);
+    const originalPaths = svgEl.querySelectorAll("path");
+    const clonedPaths = clone.querySelectorAll("path");
+    originalPaths.forEach((p, i) => {
+      const cs = getComputedStyle(p);
+      clonedPaths[i].setAttribute("fill", cs.fill);
+      clonedPaths[i].setAttribute("stroke", cs.stroke);
+      clonedPaths[i].setAttribute("stroke-width", cs.strokeWidth);
+    });
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const bbox = svgEl.getBoundingClientRect();
+    const w = Math.max(1, Math.round(bbox.width));
+    const h = Math.max(1, Math.round(bbox.height));
+    clone.setAttribute("width", w);
+    clone.setAttribute("height", h);
+
+    const svgString = new XMLSerializer().serializeToString(clone);
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2; // 高解像度で保存
+      const canvas = document.createElement("canvas");
+      canvas.width = w * scale;
+      canvas.height = h * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = getComputedStyle(document.getElementById("map-wrap")).backgroundColor || "#1B5FA8";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => {
+        if (!blob) { showToast("画像の生成に失敗しました。", "error"); return; }
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "menearth-map.png";
+        a.click();
+        showToast("画像を保存しました。");
+      }, "image/png");
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      showToast("画像の生成に失敗しました。", "error");
+    };
+    img.src = url;
+  } catch (e) {
+    showToast("画像の保存に失敗しました: " + e.message, "error");
+  }
+});
+
 const COUNTRY_CLAIM_SKIP_KEY = "menearth_skip_country_claim_confirm";
 
 async function claimCountryGroup(regionId){
@@ -1785,6 +1871,7 @@ async function claimCountryGroup(regionId){
 
 // ---------- クリック時の主張ロジック ----------
 function onRegionClick(regionId, regionName){
+  if (viewOnlyMode) return;
   if (restrictedRegionIds.has(regionId)) {
     showToast("この区画は大陸規模のため主張できません。", "error");
     return;
